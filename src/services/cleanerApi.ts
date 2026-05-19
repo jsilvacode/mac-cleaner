@@ -5,8 +5,8 @@ export async function scanCleanable(): Promise<ScanResponse> {
   return invoke<ScanResponse>("scan_cleanable");
 }
 
-export async function dryRunCleaning(): Promise<DryRunResponse> {
-  return invoke<DryRunResponse>("dry_run_cleaning");
+export async function dryRunCleaning(categories: CleanCategory[]): Promise<DryRunResponse> {
+  return invoke<DryRunResponse>("dry_run_cleaning", { categories });
 }
 
 export async function runCleaning(categories: CleanCategory[]): Promise<CommandTextResponse> {

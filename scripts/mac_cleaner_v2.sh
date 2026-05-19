@@ -3,7 +3,7 @@
 # mac_cleaner_v2.sh — Motor seguro de limpieza para macOS
 # Uso:
 #   ./mac_cleaner_v2.sh scan [--json]
-#   ./mac_cleaner_v2.sh dry-run [--json]
+#   ./mac_cleaner_v2.sh dry-run [--json] [--categories user_cache,user_logs]
 #   ./mac_cleaner_v2.sh clean [--yes] [--categories user_cache,user_logs]
 #   ./mac_cleaner_v2.sh large-files [500M]
 #   ./mac_cleaner_v2.sh top-dirs
@@ -49,7 +49,8 @@ ${APP_NAME} ${VERSION}
 
 Uso:
   $0 scan [--json]          Escanea espacio recuperable sin borrar nada
-  $0 dry-run [--json]       Lista elementos que serían eliminados
+  $0 dry-run [--json] [--categories csv]
+                            Lista elementos que serían eliminados
   $0 clean [--yes] [--categories csv]
                             Ejecuta limpieza segura (filtra categorías por ID)
   $0 large-files [500M]     Lista archivos grandes en HOME
@@ -280,11 +281,17 @@ list_candidates() {
 
 run_dry_run() {
   local json="${1:-false}"
+  local selected_categories="${2:-}"
+
+  validate_categories_csv "$selected_categories" || return 1
 
   if [ "$json" = "true" ]; then
     printf '{"version":"%s","mode":"dry-run","candidates":[' "$VERSION"
     first=1
     while IFS="|" read -r id label path age risk; do
+      if ! category_in_selection "$id" "$selected_categories"; then
+        continue
+      fi
       while IFS= read -r -d '' item; do
         kb=$(path_size_kb "$item")
         if [ "$first" -eq 0 ]; then printf ','; fi
@@ -307,6 +314,9 @@ run_dry_run() {
 
   found=0
   while IFS="|" read -r id label path age risk; do
+    if ! category_in_selection "$id" "$selected_categories"; then
+      continue
+    fi
     printf "\n%b[%s] %s | riesgo: %s | antigüedad: +%s días%b\n" "$CYAN" "$id" "$label" "$risk" "$age" "$RESET"
     while IFS= read -r -d '' item; do
       found=1
@@ -397,14 +407,52 @@ top_dirs() {
 
 main() {
   local command="${1:-help}"
-  local flag="${2:-}"
 
   case "$command" in
     scan)
-      if [ "$flag" = "--json" ]; then print_scan_json; else print_scan_table; fi
+      shift
+      local json_mode="false"
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --json)
+            json_mode="true"
+            shift
+            ;;
+          *)
+            log_error "Parámetro no reconocido para scan: $1"
+            exit 1
+            ;;
+        esac
+      done
+      if [ "$json_mode" = "true" ]; then print_scan_json; else print_scan_table; fi
       ;;
     dry-run)
-      if [ "$flag" = "--json" ]; then run_dry_run true; else run_dry_run false; fi
+      shift
+      local json_mode="false"
+      local selected_categories=""
+
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --json)
+            json_mode="true"
+            shift
+            ;;
+          --categories)
+            if [ -z "${2:-}" ]; then
+              log_error "Debes indicar categorías después de --categories."
+              exit 1
+            fi
+            selected_categories="$2"
+            shift 2
+            ;;
+          *)
+            log_error "Parámetro no reconocido para dry-run: $1"
+            exit 1
+            ;;
+        esac
+      done
+
+      run_dry_run "$json_mode" "$selected_categories"
       ;;
     clean)
       shift

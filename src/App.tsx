@@ -53,9 +53,11 @@ export default function App() {
   }
 
   function toggleCategory(category: CleanCategory) {
-    setSelectedCategories((current) =>
-      current.includes(category) ? current.filter((item) => item !== category) : [...current, category],
-    );
+    setSelectedCategories((current) => {
+      const next = current.includes(category) ? current.filter((item) => item !== category) : [...current, category];
+      return next;
+    });
+    setDryRun(null);
   }
 
   function applyScanResult(data: ScanResponse) {
@@ -63,6 +65,14 @@ export default function App() {
     setDryRun(null);
     setOutput("");
     setSelectedCategories(data.items.map((item) => item.id));
+  }
+
+  function runDryRunForSelection() {
+    if (selectedCategories.length === 0) {
+      setError("Selecciona al menos una categoría para vista previa.");
+      return;
+    }
+    runAction(() => dryRunCleaning(selectedCategories), setDryRun);
   }
 
   return (
@@ -109,7 +119,7 @@ export default function App() {
               <button className="primary-action" disabled={loading} onClick={() => runAction(scanCleanable, applyScanResult)}>
                 <Search size={18} /> Escanear Mac
               </button>
-              <button className="secondary-action" disabled={loading || !scan} onClick={() => runAction(dryRunCleaning, setDryRun)}>
+              <button className="secondary-action" disabled={loading || !scan} onClick={runDryRunForSelection}>
                 <TerminalSquare size={18} /> Vista previa
               </button>
             </div>

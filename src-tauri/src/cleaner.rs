@@ -87,34 +87,16 @@ fn run_script_dynamic(args: &[String]) -> Result<CommandTextResponse, String> {
     })
 }
 
-#[tauri::command]
-pub fn scan_cleanable() -> Result<ScanResponse, String> {
-    let response = run_script(&["scan", "--json"])?;
-    if !response.ok {
-        return Err(response.stderr);
-    }
-    serde_json::from_str::<ScanResponse>(&response.stdout)
-        .map_err(|err| format!("No se pudo interpretar el escaneo JSON: {err}"))
-}
-
-#[tauri::command]
-pub fn dry_run_cleaning() -> Result<DryRunResponse, String> {
-    let response = run_script(&["dry-run", "--json"])?;
-    if !response.ok {
-        return Err(response.stderr);
-    }
-    serde_json::from_str::<DryRunResponse>(&response.stdout)
-        .map_err(|err| format!("No se pudo interpretar el dry-run JSON: {err}"))
-}
-
-#[tauri::command]
-pub fn run_cleaning(categories: Vec<String>) -> Result<CommandTextResponse, String> {
+fn validate_and_build_categories_csv(
+    categories: Vec<String>,
+    empty_error: &str,
+) -> Result<String, String> {
     if categories.is_empty() {
-        return Err("Selecciona al menos una categoría para limpiar.".to_string());
+        return Err(empty_error.to_string());
     }
 
     if categories.len() > ALLOWED_CATEGORIES.len() {
-        return Err("Se recibieron demasiadas categorías para limpiar.".to_string());
+        return Err("Se recibieron demasiadas categorías.".to_string());
     }
 
     let mut selected: Vec<String> = Vec::with_capacity(categories.len());
@@ -127,7 +109,45 @@ pub fn run_cleaning(categories: Vec<String>) -> Result<CommandTextResponse, Stri
         }
     }
 
-    let categories_csv = selected.join(",");
+    Ok(selected.join(","))
+}
+
+#[tauri::command]
+pub fn scan_cleanable() -> Result<ScanResponse, String> {
+    let response = run_script(&["scan", "--json"])?;
+    if !response.ok {
+        return Err(response.stderr);
+    }
+    serde_json::from_str::<ScanResponse>(&response.stdout)
+        .map_err(|err| format!("No se pudo interpretar el escaneo JSON: {err}"))
+}
+
+#[tauri::command]
+pub fn dry_run_cleaning(categories: Vec<String>) -> Result<DryRunResponse, String> {
+    let categories_csv = validate_and_build_categories_csv(
+        categories,
+        "Selecciona al menos una categoría para ejecutar dry-run.",
+    )?;
+    let args = vec![
+        "dry-run".to_string(),
+        "--json".to_string(),
+        "--categories".to_string(),
+        categories_csv,
+    ];
+    let response = run_script_dynamic(&args)?;
+    if !response.ok {
+        return Err(response.stderr);
+    }
+    serde_json::from_str::<DryRunResponse>(&response.stdout)
+        .map_err(|err| format!("No se pudo interpretar el dry-run JSON: {err}"))
+}
+
+#[tauri::command]
+pub fn run_cleaning(categories: Vec<String>) -> Result<CommandTextResponse, String> {
+    let categories_csv = validate_and_build_categories_csv(
+        categories,
+        "Selecciona al menos una categoría para limpiar.",
+    )?;
     let args = vec![
         "clean".to_string(),
         "--yes".to_string(),
