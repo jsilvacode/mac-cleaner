@@ -71,20 +71,6 @@ fn script_path() -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn run_script(args: &[&str]) -> Result<CommandTextResponse, String> {
-    let path = script_path()?;
-    let output = Command::new(path)
-        .args(args)
-        .output()
-        .map_err(|err| format!("No se pudo ejecutar el motor local: {err}"))?;
-
-    Ok(CommandTextResponse {
-        ok: output.status.success(),
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-    })
-}
-
 fn run_script_dynamic(args: &[String]) -> Result<CommandTextResponse, String> {
     let path = script_path()?;
     let output = Command::new(path)
@@ -221,6 +207,88 @@ fn human_size_kb(kb: u64) -> String {
     }
 }
 
+fn parse_threshold_to_bytes(threshold: &str) -> Option<u64> {
+    let (raw_value, suffix) = threshold.split_at(threshold.len().saturating_sub(1));
+    let value = raw_value.parse::<u64>().ok()?;
+    match suffix {
+        "M" => Some(value * 1024 * 1024),
+        "G" => Some(value * 1024 * 1024 * 1024),
+        _ => None,
+    }
+}
+
+fn collect_large_files(path: &PathBuf, min_bytes: u64, out: &mut Vec<(PathBuf, u64)>) {
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return;
+    };
+
+    if meta.file_type().is_symlink() {
+        return;
+    }
+
+    if meta.is_file() {
+        let size_bytes = meta.len();
+        if size_bytes > min_bytes {
+            out.push((path.clone(), size_bytes));
+        }
+        return;
+    }
+
+    if !meta.is_dir() {
+        return;
+    }
+
+    let Ok(entries) = fs::read_dir(path) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        collect_large_files(&entry.path(), min_bytes, out);
+    }
+}
+
+fn format_large_files_output(home: &PathBuf, threshold: &str, files: &[(PathBuf, u64)]) -> String {
+    let mut output = String::new();
+    output.push_str("Archivos grandes en HOME\n");
+    output.push_str(&format!(
+        "Buscando archivos mayores a {threshold}. No se eliminará nada.\n"
+    ));
+    output.push_str(&format!("HOME: {}\n\n", home.display()));
+
+    if files.is_empty() {
+        output.push_str("No se encontraron archivos sobre el umbral.\n");
+        return output;
+    }
+
+    for (path, size_bytes) in files {
+        let size_kb = size_bytes.div_ceil(1024);
+        output.push_str(&format!(
+            "{:>10}  {}\n",
+            human_size_kb(size_kb),
+            path.display()
+        ));
+    }
+
+    output
+}
+
+fn format_top_dirs_output(home: &PathBuf, dirs: &[(PathBuf, u64)]) -> String {
+    let mut output = String::new();
+    output.push_str("Top carpetas más pesadas en HOME\n");
+    output.push_str(&format!("HOME: {}\n\n", home.display()));
+
+    if dirs.is_empty() {
+        output.push_str("No se encontraron carpetas evaluables.\n");
+        return output;
+    }
+
+    for (path, kb) in dirs {
+        output.push_str(&format!("{:>10}  {}\n", human_size_kb(*kb), path.display()));
+    }
+
+    output
+}
+
 fn validate_and_normalize_categories(
     categories: Vec<String>,
     empty_error: &str,
@@ -354,17 +422,57 @@ pub fn find_large_files(threshold: String) -> Result<CommandTextResponse, String
     if !allowed.contains(&threshold.as_str()) {
         return Err("Threshold no permitido. Usa 500M, 1G, 2G o 5G.".to_string());
     }
-    run_script(&["large-files", threshold.as_str()])
+
+    let min_bytes = parse_threshold_to_bytes(&threshold)
+        .ok_or_else(|| "No se pudo interpretar el threshold solicitado.".to_string())?;
+    let home = resolve_home()?;
+    let mut files = Vec::new();
+    collect_large_files(&home, min_bytes, &mut files);
+    files.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+
+    Ok(CommandTextResponse {
+        ok: true,
+        stdout: format_large_files_output(&home, &threshold, &files),
+        stderr: String::new(),
+    })
 }
 
 #[tauri::command]
 pub fn get_top_dirs() -> Result<CommandTextResponse, String> {
-    run_script(&["top-dirs"])
+    let home = resolve_home()?;
+    let mut rows = Vec::new();
+
+    let entries =
+        fs::read_dir(&home).map_err(|err| format!("No se pudo leer HOME para top dirs: {err}"))?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(meta) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if meta.file_type().is_symlink() {
+            continue;
+        }
+        let kb = size_kb(&path);
+        rows.push((path, kb));
+    }
+
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    rows.truncate(10);
+
+    Ok(CommandTextResponse {
+        ok: true,
+        stdout: format_top_dirs_output(&home, &rows),
+        stderr: String::new(),
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{dry_run_cleaning, scan_cleanable, validate_and_normalize_categories};
+    use super::{
+        dry_run_cleaning, parse_threshold_to_bytes, scan_cleanable,
+        validate_and_normalize_categories,
+    };
 
     #[test]
     fn scan_cleanable_returns_expected_categories() {
@@ -400,5 +508,15 @@ mod tests {
         for candidate in result.candidates {
             assert_eq!(candidate.category, "tmp");
         }
+    }
+
+    #[test]
+    fn threshold_parser_supports_allowed_values() {
+        assert_eq!(parse_threshold_to_bytes("500M"), Some(500 * 1024 * 1024));
+        assert_eq!(parse_threshold_to_bytes("1G"), Some(1024 * 1024 * 1024));
+        assert_eq!(parse_threshold_to_bytes("2G"), Some(2 * 1024 * 1024 * 1024));
+        assert_eq!(parse_threshold_to_bytes("5G"), Some(5 * 1024 * 1024 * 1024));
+        assert_eq!(parse_threshold_to_bytes("100K"), None);
+        assert_eq!(parse_threshold_to_bytes("abc"), None);
     }
 }
