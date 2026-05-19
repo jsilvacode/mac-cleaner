@@ -40,3 +40,7 @@ El frontend nunca borra archivos. El frontend solicita acciones al backend Rust.
 ## Interface direction
 
 La documentación interna de arquitectura, seguridad y roadmap se mantiene fuera del repositorio público.
+
+## License
+
+Este proyecto se distribuye bajo licencia **GNU AGPL-3.0**. Consulta el archivo `LICENSE` para los términos completos.
