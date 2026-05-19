@@ -17,7 +17,7 @@ import {
   TerminalSquare,
 } from "lucide-react";
 import { dryRunCleaning, findLargeFiles, getTopDirs, runCleaning, scanCleanable } from "./services/cleanerApi";
-import type { DryRunResponse, RiskLevel, ScanResponse } from "./types/cleaner";
+import type { CleanCategory, DryRunResponse, RiskLevel, ScanResponse } from "./types/cleaner";
 
 const formatGb = (kb: number) => `${(kb / 1024 / 1024).toFixed(2)} GB`;
 
@@ -30,6 +30,7 @@ const riskMeta: Record<RiskLevel, { label: string; className: string; text: stri
 export default function App() {
   const [scan, setScan] = useState<ScanResponse | null>(null);
   const [dryRun, setDryRun] = useState<DryRunResponse | null>(null);
+  const [selectedCategories, setSelectedCategories] = useState<CleanCategory[]>([]);
   const [output, setOutput] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
@@ -49,6 +50,19 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function toggleCategory(category: CleanCategory) {
+    setSelectedCategories((current) =>
+      current.includes(category) ? current.filter((item) => item !== category) : [...current, category],
+    );
+  }
+
+  function applyScanResult(data: ScanResponse) {
+    setScan(data);
+    setDryRun(null);
+    setOutput("");
+    setSelectedCategories(data.items.map((item) => item.id));
   }
 
   return (
@@ -92,7 +106,7 @@ export default function App() {
               Escanea rutas permitidas, revisa candidatos antes de limpiar y conserva trazabilidad técnica sin exponer al usuario a comandos complejos.
             </p>
             <div className="hero-actions">
-              <button className="primary-action" disabled={loading} onClick={() => runAction(scanCleanable, setScan)}>
+              <button className="primary-action" disabled={loading} onClick={() => runAction(scanCleanable, applyScanResult)}>
                 <Search size={18} /> Escanear Mac
               </button>
               <button className="secondary-action" disabled={loading || !scan} onClick={() => runAction(dryRunCleaning, setDryRun)}>
@@ -113,15 +127,21 @@ export default function App() {
           <MetricCard icon={<HardDrive size={19} />} label="Espacio potencial" value={totalKb > 0 ? formatGb(totalKb) : "0.00 GB"} note="Antes de limpiar se recomienda dry-run." />
           <MetricCard icon={<CheckCircle2 size={19} />} label="Elementos seguros" value={String(safeItems)} note="Categorías de menor riesgo operativo." />
           <MetricCard icon={<AlertTriangle size={19} />} label="Requieren revisión" value={String(reviewItems)} note="Acciones medias o avanzadas." />
-          <MetricCard icon={<Database size={19} />} label="Dry-run" value={dryRun ? String(dryRun.candidates.length) : "--"} note="Candidatos concretos detectados." />
+          <MetricCard icon={<Database size={19} />} label="Selección activa" value={String(selectedCategories.length)} note={dryRun ? `${dryRun.candidates.length} candidatos en dry-run.` : "Define categorías antes de limpiar."} />
         </section>
 
         <section className="command-strip">
           <button disabled={loading || !dryRun} className="danger-action" onClick={() => {
+            if (selectedCategories.length === 0) {
+              setError("Selecciona al menos una categoría antes de limpiar.");
+              return;
+            }
             const ok = window.confirm("Se ejecutará limpieza segura solo en rutas permitidas. ¿Continuar?");
-            if (ok) runAction(runCleaning, (data) => setOutput(data.stdout || data.stderr));
+            if (ok) {
+              runAction(() => runCleaning(selectedCategories), (data) => setOutput(data.stdout || data.stderr));
+            }
           }}>
-            <Play size={17} /> Limpiar seleccionado
+            <Play size={17} /> Limpiar {selectedCategories.length > 0 ? `(${selectedCategories.length})` : ""}
           </button>
           <button disabled={loading} onClick={() => runAction(() => findLargeFiles("1G"), (data) => setOutput(data.stdout))}>Archivos &gt; 1GB</button>
           <button disabled={loading} onClick={() => runAction(getTopDirs, (data) => setOutput(data.stdout))}>Top carpetas</button>
@@ -150,11 +170,13 @@ export default function App() {
               return (
                 <motion.article
                   className="cleaner-card"
+                  onClick={() => toggleCategory(item.id)}
                   key={item.id}
                   initial={{ opacity: 0, y: 14 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 10 }}
                   transition={{ duration: 0.28, delay: index * 0.035, ease: "easeOut" }}
+                  data-selected={selectedCategories.includes(item.id)}
                 >
                   <div className="card-topline">
                     <span className={`risk-pill ${meta.className}`}>{meta.label}</span>
@@ -163,7 +185,9 @@ export default function App() {
                   <h3>{item.label}</h3>
                   <strong>{item.estimated_human}</strong>
                   <p className="mono-path">{item.path}</p>
-                  <small>{meta.text} · regla: más de {item.age_days} días</small>
+                  <small>
+                    {meta.text} · regla: más de {item.age_days} días · {selectedCategories.includes(item.id) ? "seleccionada" : "omitida"}
+                  </small>
                 </motion.article>
               );
             })}

@@ -43,6 +43,8 @@ pub struct CommandTextResponse {
     pub stderr: String,
 }
 
+const ALLOWED_CATEGORIES: [&str; 4] = ["user_cache", "user_logs", "trash", "tmp"];
+
 fn script_path() -> Result<PathBuf, String> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let repo_root = manifest_dir
@@ -58,6 +60,20 @@ fn script_path() -> Result<PathBuf, String> {
 }
 
 fn run_script(args: &[&str]) -> Result<CommandTextResponse, String> {
+    let path = script_path()?;
+    let output = Command::new(path)
+        .args(args)
+        .output()
+        .map_err(|err| format!("No se pudo ejecutar el motor local: {err}"))?;
+
+    Ok(CommandTextResponse {
+        ok: output.status.success(),
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    })
+}
+
+fn run_script_dynamic(args: &[String]) -> Result<CommandTextResponse, String> {
     let path = script_path()?;
     let output = Command::new(path)
         .args(args)
@@ -92,10 +108,34 @@ pub fn dry_run_cleaning() -> Result<DryRunResponse, String> {
 }
 
 #[tauri::command]
-pub fn run_cleaning() -> Result<CommandTextResponse, String> {
-    // La confirmación de usuario ocurre en la UI antes de invocar este comando.
-    // Ejecutamos en modo no interactivo para evitar bloqueos por prompts.
-    run_script(&["clean", "--yes"])
+pub fn run_cleaning(categories: Vec<String>) -> Result<CommandTextResponse, String> {
+    if categories.is_empty() {
+        return Err("Selecciona al menos una categoría para limpiar.".to_string());
+    }
+
+    if categories.len() > ALLOWED_CATEGORIES.len() {
+        return Err("Se recibieron demasiadas categorías para limpiar.".to_string());
+    }
+
+    let mut selected: Vec<String> = Vec::with_capacity(categories.len());
+    for category in categories {
+        if !ALLOWED_CATEGORIES.contains(&category.as_str()) {
+            return Err(format!("Categoría no permitida: {category}"));
+        }
+        if !selected.iter().any(|item| item == &category) {
+            selected.push(category);
+        }
+    }
+
+    let categories_csv = selected.join(",");
+    let args = vec![
+        "clean".to_string(),
+        "--yes".to_string(),
+        "--categories".to_string(),
+        categories_csv,
+    ];
+
+    run_script_dynamic(&args)
 }
 
 #[tauri::command]

@@ -1,7 +1,8 @@
 export type RiskLevel = "bajo" | "medio" | "alto";
+export type CleanCategory = "user_cache" | "user_logs" | "trash" | "tmp";
 
 export interface ScanItem {
-  id: string;
+  id: CleanCategory;
   label: string;
   path: string;
   age_days: number;
@@ -17,7 +18,7 @@ export interface ScanResponse {
 }
 
 export interface DryRunCandidate {
-  category: string;
+  category: CleanCategory;
   path: string;
   size_kb: number;
   size_human: string;

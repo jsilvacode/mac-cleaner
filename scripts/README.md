@@ -9,6 +9,7 @@
 ./mac_cleaner_v2.sh dry-run --json
 ./mac_cleaner_v2.sh clean
 ./mac_cleaner_v2.sh clean --yes
+./mac_cleaner_v2.sh clean --yes --categories user_cache,user_logs
 ```
 
 ## Rol dentro de Tauri

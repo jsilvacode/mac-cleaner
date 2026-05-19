@@ -4,7 +4,7 @@
 # Uso:
 #   ./mac_cleaner_v2.sh scan [--json]
 #   ./mac_cleaner_v2.sh dry-run [--json]
-#   ./mac_cleaner_v2.sh clean [--yes]
+#   ./mac_cleaner_v2.sh clean [--yes] [--categories user_cache,user_logs]
 #   ./mac_cleaner_v2.sh large-files [500M]
 #   ./mac_cleaner_v2.sh top-dirs
 # ============================================================
@@ -50,7 +50,8 @@ ${APP_NAME} ${VERSION}
 Uso:
   $0 scan [--json]          Escanea espacio recuperable sin borrar nada
   $0 dry-run [--json]       Lista elementos que serían eliminados
-  $0 clean [--yes]          Ejecuta limpieza segura (sin prompts con --yes)
+  $0 clean [--yes] [--categories csv]
+                            Ejecuta limpieza segura (filtra categorías por ID)
   $0 large-files [500M]     Lista archivos grandes en HOME
   $0 top-dirs               Muestra carpetas más pesadas en HOME
   $0 help                   Muestra esta ayuda
@@ -123,6 +124,65 @@ is_allowed_path() {
       return 1
       ;;
   esac
+}
+
+is_allowed_category() {
+  local category="$1"
+  case "$category" in
+    user_cache|user_logs|trash|tmp)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+category_in_selection() {
+  local category="$1"
+  local selected_csv="${2:-}"
+  local selected
+
+  if [ -z "$selected_csv" ]; then
+    return 0
+  fi
+
+  IFS=',' read -r -a selected <<< "$selected_csv"
+  for item in "${selected[@]}"; do
+    if [ "$item" = "$category" ]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+validate_categories_csv() {
+  local selected_csv="${1:-}"
+  local selected
+
+  if [ -z "$selected_csv" ]; then
+    return 0
+  fi
+
+  IFS=',' read -r -a selected <<< "$selected_csv"
+  if [ "${#selected[@]}" -eq 0 ]; then
+    log_error "Lista de categorías inválida."
+    return 1
+  fi
+
+  for item in "${selected[@]}"; do
+    if [ -z "$item" ]; then
+      log_error "Lista de categorías inválida."
+      return 1
+    fi
+    if ! is_allowed_category "$item"; then
+      log_error "Categoría no permitida: $item"
+      return 1
+    fi
+  done
+
+  return 0
 }
 
 validate_target() {
@@ -261,6 +321,10 @@ run_dry_run() {
 
 run_clean() {
   local auto_confirm="${1:-false}"
+  local selected_categories="${2:-}"
+
+  validate_categories_csv "$selected_categories" || return 1
+
   separator
   printf "%bLimpieza segura macOS%b\n" "$BOLD" "$RESET"
   separator
@@ -271,6 +335,10 @@ run_clean() {
   after_total=0
 
   while IFS="|" read -r id label path age risk; do
+    if ! category_in_selection "$id" "$selected_categories"; then
+      continue
+    fi
+
     kb=$(estimated_cleanable_kb "$path" "$age")
     printf "\n%b[%s] %s%b\n" "$CYAN" "$id" "$label" "$RESET"
     printf "  Ruta: %s\n" "$path"
@@ -339,11 +407,32 @@ main() {
       if [ "$flag" = "--json" ]; then run_dry_run true; else run_dry_run false; fi
       ;;
     clean)
-      if [ "$flag" = "--yes" ]; then
-        run_clean true
-      else
-        run_clean false
-      fi
+      shift
+      local auto_confirm="false"
+      local selected_categories=""
+
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --yes)
+            auto_confirm="true"
+            shift
+            ;;
+          --categories)
+            if [ -z "${2:-}" ]; then
+              log_error "Debes indicar categorías después de --categories."
+              exit 1
+            fi
+            selected_categories="$2"
+            shift 2
+            ;;
+          *)
+            log_error "Parámetro no reconocido para clean: $1"
+            exit 1
+            ;;
+        esac
+      done
+
+      run_clean "$auto_confirm" "$selected_categories"
       ;;
     large-files)
       large_files "${2:-500M}"

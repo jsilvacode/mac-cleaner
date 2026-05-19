@@ -277,6 +277,17 @@ h1 {
   border-radius: 24px;
   padding: 18px;
   min-width: 0;
+  cursor: pointer;
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.cleaner-card[data-selected="true"] {
+  border-color: rgba(125, 183, 255, 0.65);
+  box-shadow: 0 22px 56px rgba(28, 88, 160, 0.30);
+}
+
+.cleaner-card[data-selected="false"] {
+  opacity: 0.86;
 }
 .card-topline {
   display: flex;
