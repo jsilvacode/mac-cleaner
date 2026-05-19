@@ -53,9 +53,9 @@ pub struct CommandTextResponse {
 
 const ALLOWED_CATEGORIES: [&str; 4] = ["user_cache", "user_logs", "trash", "tmp"];
 #[cfg(feature = "native-clean")]
-const NATIVE_CLEAN_FLAG: &str = "MAC_CLEANER_NATIVE_CLEAN";
-#[cfg(feature = "native-clean")]
 const DUAL_PARITY_FLAG: &str = "MAC_CLEANER_DUAL_PARITY";
+#[cfg(feature = "native-clean")]
+const FORCE_SHELL_FLAG: &str = "MAC_CLEANER_FORCE_SHELL";
 #[cfg(feature = "native-clean")]
 const CLEAN_LOG_SUBDIR: &str = "Library/Logs/mac_cleaner_tauri_agent";
 #[cfg(feature = "native-clean")]
@@ -842,7 +842,7 @@ pub fn run_cleaning(categories: Vec<String>) -> Result<CommandTextResponse, Stri
         if bool_env_enabled(DUAL_PARITY_FLAG) {
             return run_cleaning_parity_mode(&selected);
         }
-        if bool_env_enabled(NATIVE_CLEAN_FLAG) {
+        if !bool_env_enabled(FORCE_SHELL_FLAG) {
             return run_cleaning_native(&selected);
         }
     }

@@ -37,6 +37,15 @@ npm run tauri:dev
 
 El frontend nunca borra archivos. El frontend solicita acciones al backend Rust. Rust valida la acción, ejecuta solo comandos permitidos y, mientras la lógica no esté migrada completamente a Rust, invoca el script Shell seguro como motor transitorio.
 
+## Migration Status
+
+- `scan_cleanable`: Rust nativo
+- `dry_run_cleaning`: Rust nativo
+- `find_large_files`: Rust nativo
+- `get_top_dirs`: Rust nativo
+- `run_cleaning`: Rust nativo por defecto (con fallback shell controlado por `MAC_CLEANER_FORCE_SHELL=1`)
+- `MAC_CLEANER_DUAL_PARITY=1`: activa simulación de paridad Rust vs Shell (sin borrado)
+
 ## Interface direction
 
 La documentación interna de arquitectura, seguridad y roadmap se mantiene fuera del repositorio público.

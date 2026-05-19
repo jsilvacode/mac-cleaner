@@ -107,11 +107,12 @@ Compile-time feature (Rust/Cargo):
 
 Runtime flags (environment variables):
 
-- `MAC_CLEANER_NATIVE_CLEAN=1`
-  - Enables native deletion path when binary is built with `native-clean`.
 - `MAC_CLEANER_DUAL_PARITY=1`
   - Enables dual simulation/parity mode (no deletion, compares native vs shell dry-run).
-  - Takes precedence over `MAC_CLEANER_NATIVE_CLEAN`.
+  - Takes precedence over normal clean execution.
+- `MAC_CLEANER_FORCE_SHELL=1`
+  - Forces temporary fallback to shell clean bridge.
+  - Useful as rollback switch if native clean issue is detected.
 
 ## Test Matrix
 
