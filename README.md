@@ -47,12 +47,14 @@ El frontend nunca borra archivos. El frontend solicita acciones al backend Rust.
 - `MAC_CLEANER_DUAL_PARITY=1`: activa simulación de paridad Rust vs Shell (sin borrado)
 - `get_clean_history`: historial local desde logs JSONL nativos
 - `export_clean_history_report`: exporta reporte Markdown del historial local
+- `apply_clean_history_retention`: poda historial nativo por política de días
 
 ## Phase 4 (in progress)
 
 - Historial local integrado en backend y UI.
+- Filtros de historial por estado, rango, categoría y orden.
 - Exportación de reporte de historial a `~/Library/Logs/mac_cleaner_tauri_agent/reports/`.
-- Preferencias locales iniciales (categorías por defecto y threshold de archivos grandes).
+- Preferencias locales avanzadas: categorías por defecto, threshold de archivos grandes, retención de logs y límite de exportación.
 
 ## Interface direction
 

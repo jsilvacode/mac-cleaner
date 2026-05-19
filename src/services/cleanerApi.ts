@@ -6,6 +6,7 @@ import type {
   DryRunResponse,
   ExportReportResponse,
   LargeFilesThreshold,
+  PruneHistoryResponse,
   ScanResponse,
 } from "../types/cleaner";
 
@@ -35,4 +36,8 @@ export async function getCleanHistory(limit = 20): Promise<CleanHistoryEntry[]> 
 
 export async function exportCleanHistoryReport(limit = 20): Promise<ExportReportResponse> {
   return invoke<ExportReportResponse>("export_clean_history_report", { limit });
+}
+
+export async function applyCleanHistoryRetention(retentionDays: number): Promise<PruneHistoryResponse> {
+  return invoke<PruneHistoryResponse>("apply_clean_history_retention", { retentionDays });
 }

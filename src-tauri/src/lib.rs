@@ -10,7 +10,8 @@ pub fn run() {
             cleaner::find_large_files,
             cleaner::get_top_dirs,
             cleaner::get_clean_history,
-            cleaner::export_clean_history_report
+            cleaner::export_clean_history_report,
+            cleaner::apply_clean_history_retention
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

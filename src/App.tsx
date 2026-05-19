@@ -11,7 +11,6 @@ import {
   Gauge,
   HardDrive,
   History,
-  Layers3,
   Play,
   Search,
   Settings,
@@ -20,6 +19,7 @@ import {
   TerminalSquare,
 } from "lucide-react";
 import {
+  applyCleanHistoryRetention,
   dryRunCleaning,
   exportCleanHistoryReport,
   findLargeFiles,
@@ -39,7 +39,7 @@ import type {
 } from "./types/cleaner";
 
 const formatGb = (kb: number) => `${(kb / 1024 / 1024).toFixed(2)} GB`;
-const PREFERENCES_KEY = "mac_cleaner_preferences_v1";
+const PREFERENCES_KEY = "mac_cleaner_preferences_v2";
 
 const allCategories: Array<{ id: CleanCategory; label: string }> = [
   { id: "user_cache", label: "Caché de usuario" },
@@ -53,6 +53,8 @@ const allowedThresholds: LargeFilesThreshold[] = ["500M", "1G", "2G", "5G"];
 const defaultPreferences: CleaningPreferences = {
   defaultCategories: ["user_cache", "user_logs", "trash", "tmp"],
   largeFilesThreshold: "1G",
+  historyRetentionDays: 30,
+  historyExportLimit: 30,
 };
 
 const riskMeta: Record<RiskLevel, { label: string; className: string; text: string }> = {
@@ -62,6 +64,23 @@ const riskMeta: Record<RiskLevel, { label: string; className: string; text: stri
 };
 
 type AppView = "overview" | "files" | "history" | "settings";
+type HistoryStatusFilter = "all" | "ok" | "partial" | "running" | "incomplete";
+type HistorySort = "date_desc" | "date_asc" | "reclaimed_desc" | "errors_desc";
+
+function clampNumber(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+  return Math.min(max, Math.max(min, Math.trunc(value)));
+}
+
+function epochToLocalDateKey(epochSecs: number): string {
+  const date = new Date(epochSecs * 1000);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
 function loadPreferences(): CleaningPreferences {
   try {
@@ -80,9 +99,14 @@ function loadPreferences(): CleaningPreferences {
       )
       : defaultPreferences.defaultCategories;
 
+    const historyRetentionDays = clampNumber(parsed.historyRetentionDays ?? defaultPreferences.historyRetentionDays, 1, 3650);
+    const historyExportLimit = clampNumber(parsed.historyExportLimit ?? defaultPreferences.historyExportLimit, 5, 200);
+
     return {
       defaultCategories: defaultCategories.length > 0 ? defaultCategories : defaultPreferences.defaultCategories,
       largeFilesThreshold,
+      historyRetentionDays,
+      historyExportLimit,
     };
   } catch {
     return defaultPreferences;
@@ -103,6 +127,11 @@ export default function App() {
   const [selectedCategories, setSelectedCategories] = useState<CleanCategory[]>([]);
   const [historyItems, setHistoryItems] = useState<CleanHistoryEntry[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [historyStatusFilter, setHistoryStatusFilter] = useState<HistoryStatusFilter>("all");
+  const [historyCategoryFilter, setHistoryCategoryFilter] = useState<"all" | CleanCategory>("all");
+  const [historyFromDate, setHistoryFromDate] = useState<string>("");
+  const [historyToDate, setHistoryToDate] = useState<string>("");
+  const [historySort, setHistorySort] = useState<HistorySort>("date_desc");
   const [preferences, setPreferences] = useState<CleaningPreferences>(() => loadPreferences());
   const [output, setOutput] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -122,6 +151,49 @@ export default function App() {
   const safeItems = scan?.items.filter((item) => item.risk === "bajo").length ?? 0;
   const reviewItems = scan?.items.filter((item) => item.risk !== "bajo").length ?? 0;
 
+  const filteredHistoryItems = useMemo(() => {
+    const byDateRange = historyItems.filter((entry) => {
+      const dateKey = epochToLocalDateKey(entry.started_at_epoch_secs);
+      if (historyFromDate && dateKey < historyFromDate) {
+        return false;
+      }
+      if (historyToDate && dateKey > historyToDate) {
+        return false;
+      }
+      return true;
+    });
+
+    const byStatus = byDateRange.filter((entry) => {
+      if (historyStatusFilter === "all") {
+        return true;
+      }
+      return entry.status === historyStatusFilter;
+    });
+
+    const byCategory = byStatus.filter((entry) => {
+      if (historyCategoryFilter === "all") {
+        return true;
+      }
+      return entry.selected_categories.includes(historyCategoryFilter);
+    });
+
+    const sorted = [...byCategory];
+    sorted.sort((a, b) => {
+      if (historySort === "date_asc") {
+        return a.started_at_epoch_secs - b.started_at_epoch_secs;
+      }
+      if (historySort === "reclaimed_desc") {
+        return b.reclaimed_total_kb - a.reclaimed_total_kb;
+      }
+      if (historySort === "errors_desc") {
+        return b.error_count - a.error_count;
+      }
+      return b.started_at_epoch_secs - a.started_at_epoch_secs;
+    });
+
+    return sorted;
+  }, [historyItems, historyStatusFilter, historyCategoryFilter, historyFromDate, historyToDate, historySort]);
+
   async function runAction<T>(action: () => Promise<T>, onSuccess: (data: T) => void) {
     setLoading(true);
     setError("");
@@ -136,7 +208,7 @@ export default function App() {
   }
 
   async function loadHistory() {
-    await runAction(() => getCleanHistory(30), (data) => {
+    await runAction(() => getCleanHistory(200), (data) => {
       setHistoryItems(data);
       setHistoryLoaded(true);
     });
@@ -208,9 +280,24 @@ export default function App() {
   }
 
   function exportHistoryReport() {
-    runAction(() => exportCleanHistoryReport(30), (data) => {
+    runAction(() => exportCleanHistoryReport(preferences.historyExportLimit), (data) => {
       setOutput(`Reporte exportado: ${data.report_path} (runs: ${data.exported_runs})`);
     });
+  }
+
+  function applyHistoryRetentionNow() {
+    runAction(() => applyCleanHistoryRetention(preferences.historyRetentionDays), (data) => {
+      setOutput(`Retención aplicada: ${data.removed_runs} corridas eliminadas, ${data.kept_runs} conservadas.`);
+      setHistoryLoaded(false);
+    });
+  }
+
+  function resetHistoryFilters() {
+    setHistoryStatusFilter("all");
+    setHistoryCategoryFilter("all");
+    setHistoryFromDate("");
+    setHistoryToDate("");
+    setHistorySort("date_desc");
   }
 
   return (
@@ -398,20 +485,72 @@ export default function App() {
                 <p className="eyebrow muted">Trazabilidad</p>
                 <h2>Historial local</h2>
               </div>
-              <span>{historyItems.length} ejecuciones</span>
+              <span>{filteredHistoryItems.length} de {historyItems.length} ejecuciones</span>
             </section>
 
-            <section className="command-strip">
-              <button disabled={loading} onClick={() => void loadHistory()}>
-                <History size={17} /> Recargar historial
-              </button>
-              <button disabled={loading} onClick={exportHistoryReport}>
-                <Download size={17} /> Exportar reporte
-              </button>
+            <section className="glass-panel history-filters-panel">
+              <div className="panel-heading">
+                <h2>Filtros</h2>
+                <span>Orden y rango</span>
+              </div>
+              <div className="history-filters-grid">
+                <label className="settings-field" htmlFor="historyStatusFilter">
+                  <span>Estado</span>
+                  <select id="historyStatusFilter" value={historyStatusFilter} onChange={(event) => setHistoryStatusFilter(event.target.value as HistoryStatusFilter)}>
+                    <option value="all">Todos</option>
+                    <option value="ok">OK</option>
+                    <option value="partial">Parcial</option>
+                    <option value="running">Running</option>
+                    <option value="incomplete">Incompleto</option>
+                  </select>
+                </label>
+
+                <label className="settings-field" htmlFor="historyCategoryFilter">
+                  <span>Categoría</span>
+                  <select id="historyCategoryFilter" value={historyCategoryFilter} onChange={(event) => setHistoryCategoryFilter(event.target.value as "all" | CleanCategory)}>
+                    <option value="all">Todas</option>
+                    {allCategories.map((category) => (
+                      <option value={category.id} key={category.id}>{category.label}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="settings-field" htmlFor="historyFromDate">
+                  <span>Desde</span>
+                  <input id="historyFromDate" type="date" value={historyFromDate} onChange={(event) => setHistoryFromDate(event.target.value)} />
+                </label>
+
+                <label className="settings-field" htmlFor="historyToDate">
+                  <span>Hasta</span>
+                  <input id="historyToDate" type="date" value={historyToDate} onChange={(event) => setHistoryToDate(event.target.value)} />
+                </label>
+
+                <label className="settings-field" htmlFor="historySort">
+                  <span>Orden</span>
+                  <select id="historySort" value={historySort} onChange={(event) => setHistorySort(event.target.value as HistorySort)}>
+                    <option value="date_desc">Más recientes</option>
+                    <option value="date_asc">Más antiguas</option>
+                    <option value="reclaimed_desc">Más espacio recuperado</option>
+                    <option value="errors_desc">Más errores/omitidos</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="command-strip">
+                <button disabled={loading} onClick={() => void loadHistory()}>
+                  <History size={17} /> Recargar historial
+                </button>
+                <button disabled={loading} onClick={exportHistoryReport}>
+                  <Download size={17} /> Exportar reporte
+                </button>
+                <button disabled={loading} onClick={resetHistoryFilters}>
+                  Limpiar filtros
+                </button>
+              </div>
             </section>
 
             <section className="cleaner-grid history-grid">
-              {historyItems.map((entry) => (
+              {filteredHistoryItems.map((entry) => (
                 <article className="cleaner-card" key={entry.run_id} data-selected={false}>
                   <div className="card-topline">
                     <span className={`risk-pill ${entry.status === "ok" ? "risk-low" : "risk-medium"}`}>
@@ -427,11 +566,11 @@ export default function App() {
                 </article>
               ))}
 
-              {historyItems.length === 0 && (
+              {filteredHistoryItems.length === 0 && (
                 <div className="empty-state">
                   <History size={28} />
-                  <h3>Sin historial nativo</h3>
-                  <p>Ejecuta una limpieza nativa para registrar eventos JSONL y visualizar corridas aquí.</p>
+                  <h3>Sin resultados en historial</h3>
+                  <p>Ajusta los filtros o ejecuta una limpieza nativa para registrar nuevas corridas.</p>
                 </div>
               )}
             </section>
@@ -487,11 +626,50 @@ export default function App() {
                     ))}
                   </div>
                 </div>
+
+                <label className="settings-field" htmlFor="historyRetentionDays">
+                  <span>Retención de logs (días)</span>
+                  <input
+                    id="historyRetentionDays"
+                    type="number"
+                    min={1}
+                    max={3650}
+                    value={preferences.historyRetentionDays}
+                    onChange={(event) => {
+                      const parsed = Number(event.target.value);
+                      setPreferences((current) => ({
+                        ...current,
+                        historyRetentionDays: clampNumber(parsed, 1, 3650),
+                      }));
+                    }}
+                  />
+                </label>
+
+                <label className="settings-field" htmlFor="historyExportLimit">
+                  <span>Límite de corridas exportadas</span>
+                  <input
+                    id="historyExportLimit"
+                    type="number"
+                    min={5}
+                    max={200}
+                    value={preferences.historyExportLimit}
+                    onChange={(event) => {
+                      const parsed = Number(event.target.value);
+                      setPreferences((current) => ({
+                        ...current,
+                        historyExportLimit: clampNumber(parsed, 5, 200),
+                      }));
+                    }}
+                  />
+                </label>
               </div>
 
               <div className="command-strip">
                 <button disabled={!scan || loading} onClick={applyDefaultSelectionToCurrentScan}>
                   Aplicar categorías al escaneo actual
+                </button>
+                <button disabled={loading} onClick={applyHistoryRetentionNow}>
+                  Aplicar retención de logs
                 </button>
               </div>
             </section>

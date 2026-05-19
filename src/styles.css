@@ -373,6 +373,25 @@ pre { white-space: pre-wrap; overflow: auto; }
   padding: 10px 12px;
 }
 
+.settings-field input {
+  width: 220px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f5f7fa;
+  padding: 10px 12px;
+}
+
+.history-filters-panel {
+  margin-bottom: 14px;
+}
+
+.history-filters-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
 .prefs-categories {
   display: grid;
   gap: 8px;
@@ -396,6 +415,7 @@ pre { white-space: pre-wrap; overflow: auto; }
   .nav-stack { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .hero-panel { grid-template-columns: 1fr; }
   .metrics-grid, .cleaner-grid, .history-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .history-filters-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 720px) {
@@ -403,4 +423,6 @@ pre { white-space: pre-wrap; overflow: auto; }
   .hero-panel { padding: 22px; border-radius: 26px; }
   .metrics-grid, .cleaner-grid, .dryrun-row { grid-template-columns: 1fr; }
   .nav-stack { grid-template-columns: 1fr 1fr; }
+  .history-filters-grid { grid-template-columns: 1fr; }
+  .settings-field select, .settings-field input { width: 100%; }
 }

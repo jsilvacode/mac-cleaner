@@ -73,6 +73,14 @@ pub struct ExportReportResponse {
     pub exported_runs: usize,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PruneHistoryResponse {
+    pub ok: bool,
+    pub kept_runs: usize,
+    pub removed_runs: usize,
+    pub log_file: String,
+}
+
 const ALLOWED_CATEGORIES: [&str; 4] = ["user_cache", "user_logs", "trash", "tmp"];
 #[cfg(feature = "native-clean")]
 const DUAL_PARITY_FLAG: &str = "MAC_CLEANER_DUAL_PARITY";
@@ -399,6 +407,57 @@ fn build_history_markdown_report(entries: &[CleanHistoryEntry]) -> String {
     }
 
     report
+}
+
+#[cfg(feature = "native-clean")]
+fn read_clean_log_lines(log_path: &PathBuf) -> Result<Vec<String>, String> {
+    if !log_path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let raw = fs::read_to_string(log_path)
+        .map_err(|err| format!("No se pudo leer log de limpieza en {}: {err}", log_path.display()))?;
+    Ok(raw
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(ToString::to_string)
+        .collect())
+}
+
+#[cfg(feature = "native-clean")]
+fn split_runs_from_log_lines(lines: &[String]) -> Vec<(u64, Vec<String>)> {
+    let mut runs: Vec<(u64, Vec<String>)> = Vec::new();
+    let mut current_start: Option<u64> = None;
+    let mut current_lines: Vec<String> = Vec::new();
+
+    for line in lines {
+        let maybe_start = serde_json::from_str::<CleanLogEvent>(line).ok().and_then(|event| {
+            if event.event == "start" {
+                Some(event.ts_epoch_secs)
+            } else {
+                None
+            }
+        });
+
+        if let Some(start_ts) = maybe_start {
+            if let Some(existing_start) = current_start.take() {
+                runs.push((existing_start, std::mem::take(&mut current_lines)));
+            }
+            current_start = Some(start_ts);
+            current_lines.push(line.clone());
+            continue;
+        }
+
+        if current_start.is_some() {
+            current_lines.push(line.clone());
+        }
+    }
+
+    if let Some(existing_start) = current_start {
+        runs.push((existing_start, current_lines));
+    }
+
+    runs
 }
 
 fn build_scan_categories() -> Result<Vec<ScanCategory>, String> {
@@ -961,6 +1020,9 @@ fn run_cleaning_native(selected: &[String]) -> Result<CommandTextResponse, Strin
         }
     }
 
+    let had_errors = items.iter().any(|item| item.error.is_some());
+    let final_status = if had_errors { "partial" } else { "ok" };
+
     let _ = append_clean_log(
         &log_path,
         &CleanLogEvent {
@@ -968,7 +1030,7 @@ fn run_cleaning_native(selected: &[String]) -> Result<CommandTextResponse, Strin
             event: "end".to_string(),
             category: None,
             path: None,
-            status: "ok".to_string(),
+            status: final_status.to_string(),
             reclaimed_kb: reclaimed_total_kb,
             error: None,
             detail: Some("native_clean_completed".to_string()),
@@ -1157,6 +1219,60 @@ pub fn export_clean_history_report(limit: Option<u32>) -> Result<ExportReportRes
     {
         let _ = limit;
         Err("Exportación no disponible: feature native-clean desactivado.".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn apply_clean_history_retention(retention_days: u32) -> Result<PruneHistoryResponse, String> {
+    #[cfg(feature = "native-clean")]
+    {
+        let min_days = 1_u32;
+        let max_days = 3650_u32;
+        if !(min_days..=max_days).contains(&retention_days) {
+            return Err("Retención inválida. Usa un valor entre 1 y 3650 días.".to_string());
+        }
+
+        let log_path = clean_log_file_path()?;
+        let lines = read_clean_log_lines(&log_path)?;
+        let runs = split_runs_from_log_lines(&lines);
+
+        let now = unix_timestamp_secs();
+        let retention_secs = u64::from(retention_days) * 24 * 60 * 60;
+        let cutoff = now.saturating_sub(retention_secs);
+
+        let mut kept_chunks: Vec<Vec<String>> = Vec::new();
+        let mut removed_runs = 0_usize;
+        for (started_at, run_lines) in runs {
+            if started_at >= cutoff {
+                kept_chunks.push(run_lines);
+            } else {
+                removed_runs += 1;
+            }
+        }
+
+        let mut output = String::new();
+        for chunk in &kept_chunks {
+            for line in chunk {
+                output.push_str(line);
+                output.push('\n');
+            }
+        }
+
+        fs::write(&log_path, output)
+            .map_err(|err| format!("No se pudo aplicar retención sobre log nativo: {err}"))?;
+
+        return Ok(PruneHistoryResponse {
+            ok: true,
+            kept_runs: kept_chunks.len(),
+            removed_runs,
+            log_file: log_path.display().to_string(),
+        });
+    }
+
+    #[cfg(not(feature = "native-clean"))]
+    {
+        let _ = retention_days;
+        Err("Retención no disponible: feature native-clean desactivado.".to_string())
     }
 }
 

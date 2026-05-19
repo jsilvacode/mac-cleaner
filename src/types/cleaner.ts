@@ -57,9 +57,18 @@ export interface ExportReportResponse {
   exported_runs: number;
 }
 
+export interface PruneHistoryResponse {
+  ok: boolean;
+  kept_runs: number;
+  removed_runs: number;
+  log_file: string;
+}
+
 export type LargeFilesThreshold = "500M" | "1G" | "2G" | "5G";
 
 export interface CleaningPreferences {
   defaultCategories: CleanCategory[];
   largeFilesThreshold: LargeFilesThreshold;
+  historyRetentionDays: number;
+  historyExportLimit: number;
 }
