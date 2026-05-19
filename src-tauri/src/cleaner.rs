@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -220,10 +221,10 @@ fn human_size_kb(kb: u64) -> String {
     }
 }
 
-fn validate_and_build_categories_csv(
+fn validate_and_normalize_categories(
     categories: Vec<String>,
     empty_error: &str,
-) -> Result<String, String> {
+) -> Result<Vec<String>, String> {
     if categories.is_empty() {
         return Err(empty_error.to_string());
     }
@@ -242,7 +243,44 @@ fn validate_and_build_categories_csv(
         }
     }
 
-    Ok(selected.join(","))
+    Ok(selected)
+}
+
+fn collect_dry_run_candidates(category: &ScanCategory) -> Vec<DryRunCandidate> {
+    let Ok(meta) = fs::symlink_metadata(&category.path) else {
+        return Vec::new();
+    };
+
+    if meta.file_type().is_symlink() || !meta.is_dir() {
+        return Vec::new();
+    }
+
+    let Ok(entries) = fs::read_dir(&category.path) else {
+        return Vec::new();
+    };
+
+    let mut candidates = Vec::new();
+    for entry in entries.flatten() {
+        let target = entry.path();
+        let Ok(target_meta) = fs::symlink_metadata(&target) else {
+            continue;
+        };
+        if target_meta.file_type().is_symlink() || !is_older_than(&target_meta, category.age_days) {
+            continue;
+        }
+
+        let item_size_kb = size_kb(&target);
+        candidates.push(DryRunCandidate {
+            category: category.id.to_string(),
+            path: target.display().to_string(),
+            size_kb: item_size_kb,
+            size_human: human_size_kb(item_size_kb),
+            risk: category.risk.to_string(),
+        });
+    }
+
+    candidates.sort_by(|a, b| a.path.cmp(&b.path));
+    candidates
 }
 
 #[tauri::command]
@@ -272,30 +310,34 @@ pub fn scan_cleanable() -> Result<ScanResponse, String> {
 
 #[tauri::command]
 pub fn dry_run_cleaning(categories: Vec<String>) -> Result<DryRunResponse, String> {
-    let categories_csv = validate_and_build_categories_csv(
+    let selected = validate_and_normalize_categories(
         categories,
         "Selecciona al menos una categoría para ejecutar dry-run.",
     )?;
-    let args = vec![
-        "dry-run".to_string(),
-        "--json".to_string(),
-        "--categories".to_string(),
-        categories_csv,
-    ];
-    let response = run_script_dynamic(&args)?;
-    if !response.ok {
-        return Err(response.stderr);
+
+    let selected_set: HashSet<&str> = selected.iter().map(String::as_str).collect();
+    let mut candidates = Vec::new();
+
+    for category in build_scan_categories()? {
+        if selected_set.contains(category.id) {
+            candidates.extend(collect_dry_run_candidates(&category));
+        }
     }
-    serde_json::from_str::<DryRunResponse>(&response.stdout)
-        .map_err(|err| format!("No se pudo interpretar el dry-run JSON: {err}"))
+
+    Ok(DryRunResponse {
+        version: "2.1.0-rust-dry-run".to_string(),
+        mode: "dry-run".to_string(),
+        candidates,
+    })
 }
 
 #[tauri::command]
 pub fn run_cleaning(categories: Vec<String>) -> Result<CommandTextResponse, String> {
-    let categories_csv = validate_and_build_categories_csv(
+    let categories_csv = validate_and_normalize_categories(
         categories,
         "Selecciona al menos una categoría para limpiar.",
-    )?;
+    )?
+    .join(",");
     let args = vec![
         "clean".to_string(),
         "--yes".to_string(),
@@ -322,7 +364,7 @@ pub fn get_top_dirs() -> Result<CommandTextResponse, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::scan_cleanable;
+    use super::{dry_run_cleaning, scan_cleanable, validate_and_normalize_categories};
 
     #[test]
     fn scan_cleanable_returns_expected_categories() {
@@ -334,5 +376,29 @@ mod tests {
         assert!(ids.contains(&"user_logs"));
         assert!(ids.contains(&"trash"));
         assert!(ids.contains(&"tmp"));
+    }
+
+    #[test]
+    fn dry_run_requires_categories() {
+        let err = dry_run_cleaning(Vec::new())
+            .expect_err("dry_run_cleaning should fail on empty categories");
+        assert!(err.contains("Selecciona al menos una categoría"));
+    }
+
+    #[test]
+    fn category_validation_rejects_invalid_ids() {
+        let err = validate_and_normalize_categories(vec!["xcode_cache".to_string()], "empty")
+            .expect_err("validation should reject unknown category");
+        assert!(err.contains("Categoría no permitida"));
+    }
+
+    #[test]
+    fn dry_run_scopes_candidates_to_selection() {
+        let result =
+            dry_run_cleaning(vec!["tmp".to_string()]).expect("dry_run should work for tmp");
+        assert_eq!(result.mode, "dry-run");
+        for candidate in result.candidates {
+            assert_eq!(candidate.category, "tmp");
+        }
     }
 }
