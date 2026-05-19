@@ -99,6 +99,20 @@ Example JSON line:
 4. Add temporary dual-run verification mode (dry-run compare only).
 5. Switch default to native clean once parity is confirmed.
 
+## Feature Flags
+
+Compile-time feature (Rust/Cargo):
+
+- `native-clean`
+
+Runtime flags (environment variables):
+
+- `MAC_CLEANER_NATIVE_CLEAN=1`
+  - Enables native deletion path when binary is built with `native-clean`.
+- `MAC_CLEANER_DUAL_PARITY=1`
+  - Enables dual simulation/parity mode (no deletion, compares native vs shell dry-run).
+  - Takes precedence over `MAC_CLEANER_NATIVE_CLEAN`.
+
 ## Test Matrix
 
 - Empty category list (reject).

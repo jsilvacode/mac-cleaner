@@ -46,3 +46,7 @@ jobs:
       - name: Cargo check
         working-directory: src-tauri
         run: cargo check
+
+      - name: Cargo check (native-clean feature)
+        working-directory: src-tauri
+        run: cargo check --features native-clean

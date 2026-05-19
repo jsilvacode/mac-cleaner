@@ -5,6 +5,10 @@ description = "Mac Cleaner Tauri"
 authors = ["Mac Cleaner Team"]
 edition = "2021"
 
+[features]
+default = []
+native-clean = []
+
 [lib]
 name = "mac_cleaner_tauri_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]

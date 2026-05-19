@@ -2,6 +2,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::env;
 use std::fs;
+#[cfg(feature = "native-clean")]
+use std::fs::OpenOptions;
+#[cfg(feature = "native-clean")]
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, SystemTime};
@@ -48,6 +52,14 @@ pub struct CommandTextResponse {
 }
 
 const ALLOWED_CATEGORIES: [&str; 4] = ["user_cache", "user_logs", "trash", "tmp"];
+#[cfg(feature = "native-clean")]
+const NATIVE_CLEAN_FLAG: &str = "MAC_CLEANER_NATIVE_CLEAN";
+#[cfg(feature = "native-clean")]
+const DUAL_PARITY_FLAG: &str = "MAC_CLEANER_DUAL_PARITY";
+#[cfg(feature = "native-clean")]
+const CLEAN_LOG_SUBDIR: &str = "Library/Logs/mac_cleaner_tauri_agent";
+#[cfg(feature = "native-clean")]
+const CLEAN_LOG_FILE: &str = "run-native-clean.jsonl";
 
 struct ScanCategory {
     id: &'static str,
@@ -55,6 +67,49 @@ struct ScanCategory {
     path: PathBuf,
     age_days: u32,
     risk: &'static str,
+}
+
+#[cfg(feature = "native-clean")]
+#[derive(Debug)]
+struct CleanPlanItem {
+    category: String,
+    path: PathBuf,
+    size_kb: u64,
+}
+
+#[cfg(feature = "native-clean")]
+#[derive(Debug, Serialize)]
+struct NativeCleanItemResult {
+    category: String,
+    path: String,
+    deleted: bool,
+    reclaimed_kb: u64,
+    error: Option<String>,
+}
+
+#[cfg(feature = "native-clean")]
+#[derive(Debug, Serialize)]
+struct NativeCleanResponse {
+    ok: bool,
+    mode: String,
+    processed_categories: Vec<String>,
+    reclaimed_total_kb: u64,
+    reclaimed_total_human: String,
+    items: Vec<NativeCleanItemResult>,
+    log_file: String,
+}
+
+#[cfg(feature = "native-clean")]
+#[derive(Debug, Serialize)]
+struct CleanLogEvent {
+    ts_epoch_secs: u64,
+    event: String,
+    category: Option<String>,
+    path: Option<String>,
+    status: String,
+    reclaimed_kb: u64,
+    error: Option<String>,
+    detail: Option<String>,
 }
 
 fn script_path() -> Result<PathBuf, String> {
@@ -92,6 +147,53 @@ fn resolve_home() -> Result<PathBuf, String> {
         return Err("HOME del usuario está vacío".to_string());
     }
     Ok(path)
+}
+
+#[cfg(feature = "native-clean")]
+fn bool_env_enabled(key: &str) -> bool {
+    match env::var(key) {
+        Ok(raw) => matches!(
+            raw.to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        ),
+        Err(_) => false,
+    }
+}
+
+#[cfg(feature = "native-clean")]
+fn unix_timestamp_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+#[cfg(feature = "native-clean")]
+fn clean_log_file_path() -> Result<PathBuf, String> {
+    let home = resolve_home()?;
+    Ok(home.join(CLEAN_LOG_SUBDIR).join(CLEAN_LOG_FILE))
+}
+
+#[cfg(feature = "native-clean")]
+fn append_clean_log(path: &PathBuf, event: &CleanLogEvent) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|err| format!("No se pudo crear directorio de logs: {err}"))?;
+    }
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|err| format!("No se pudo abrir log nativo: {err}"))?;
+
+    let line = serde_json::to_string(event)
+        .map_err(|err| format!("No se pudo serializar evento de log: {err}"))?;
+    file.write_all(line.as_bytes())
+        .map_err(|err| format!("No se pudo escribir evento de log: {err}"))?;
+    file.write_all(b"\n")
+        .map_err(|err| format!("No se pudo finalizar línea de log: {err}"))?;
+    Ok(())
 }
 
 fn build_scan_categories() -> Result<Vec<ScanCategory>, String> {
@@ -314,7 +416,12 @@ fn validate_and_normalize_categories(
     Ok(selected)
 }
 
-fn collect_dry_run_candidates(category: &ScanCategory) -> Vec<DryRunCandidate> {
+#[cfg(feature = "native-clean")]
+fn category_by_id<'a>(categories: &'a [ScanCategory], id: &str) -> Option<&'a ScanCategory> {
+    categories.iter().find(|item| item.id == id)
+}
+
+fn collect_category_candidates(category: &ScanCategory) -> Vec<(PathBuf, u64)> {
     let Ok(meta) = fs::symlink_metadata(&category.path) else {
         return Vec::new();
     };
@@ -338,17 +445,349 @@ fn collect_dry_run_candidates(category: &ScanCategory) -> Vec<DryRunCandidate> {
         }
 
         let item_size_kb = size_kb(&target);
-        candidates.push(DryRunCandidate {
-            category: category.id.to_string(),
-            path: target.display().to_string(),
-            size_kb: item_size_kb,
-            size_human: human_size_kb(item_size_kb),
-            risk: category.risk.to_string(),
-        });
+        candidates.push((target, item_size_kb));
     }
 
-    candidates.sort_by(|a, b| a.path.cmp(&b.path));
+    candidates.sort_by(|a, b| a.0.cmp(&b.0));
     candidates
+}
+
+fn build_dry_run_candidates(selected: &[String]) -> Result<Vec<DryRunCandidate>, String> {
+    let selected_set: HashSet<&str> = selected.iter().map(String::as_str).collect();
+    let categories = build_scan_categories()?;
+    let mut candidates = Vec::new();
+
+    for category in categories {
+        if !selected_set.contains(category.id) {
+            continue;
+        }
+
+        for (path, size_kb) in collect_category_candidates(&category) {
+            candidates.push(DryRunCandidate {
+                category: category.id.to_string(),
+                path: path.display().to_string(),
+                size_kb,
+                size_human: human_size_kb(size_kb),
+                risk: category.risk.to_string(),
+            });
+        }
+    }
+
+    candidates.sort_by(|a, b| {
+        a.category
+            .cmp(&b.category)
+            .then_with(|| a.path.cmp(&b.path))
+    });
+    Ok(candidates)
+}
+
+#[cfg(feature = "native-clean")]
+fn build_clean_plan(selected: &[String]) -> Result<Vec<CleanPlanItem>, String> {
+    let selected_set: HashSet<&str> = selected.iter().map(String::as_str).collect();
+    let categories = build_scan_categories()?;
+    let mut plan = Vec::new();
+
+    for category in categories {
+        if !selected_set.contains(category.id) {
+            continue;
+        }
+        for (path, size_kb) in collect_category_candidates(&category) {
+            plan.push(CleanPlanItem {
+                category: category.id.to_string(),
+                path,
+                size_kb,
+            });
+        }
+    }
+
+    plan.sort_by(|a, b| {
+        a.category
+            .cmp(&b.category)
+            .then_with(|| a.path.cmp(&b.path))
+    });
+    Ok(plan)
+}
+
+#[cfg(feature = "native-clean")]
+fn run_cleaning_parity_mode(selected: &[String]) -> Result<CommandTextResponse, String> {
+    let selected_csv = selected.join(",");
+    let native_candidates = build_dry_run_candidates(selected)?;
+
+    let args = vec![
+        "dry-run".to_string(),
+        "--json".to_string(),
+        "--categories".to_string(),
+        selected_csv,
+    ];
+    let shell_response = run_script_dynamic(&args)?;
+    if !shell_response.ok {
+        return Err(format!(
+            "Dual parity: el dry-run shell falló: {}",
+            shell_response.stderr
+        ));
+    }
+
+    let shell_dry_run = serde_json::from_str::<DryRunResponse>(&shell_response.stdout)
+        .map_err(|err| format!("Dual parity: no se pudo interpretar dry-run shell: {err}"))?;
+
+    let native_set: HashSet<String> = native_candidates
+        .iter()
+        .map(|item| format!("{}::{}", item.category, item.path))
+        .collect();
+    let shell_set: HashSet<String> = shell_dry_run
+        .candidates
+        .iter()
+        .map(|item| format!("{}::{}", item.category, item.path))
+        .collect();
+
+    let missing_in_shell = native_set.difference(&shell_set).count();
+    let missing_in_native = shell_set.difference(&native_set).count();
+    let perfect_match = missing_in_shell == 0 && missing_in_native == 0;
+
+    let mut report = String::new();
+    report.push_str("Dual parity mode (simulation only): no files were deleted.\n");
+    report.push_str(&format!("Selected categories: {}\n", selected.join(",")));
+    report.push_str(&format!("Native candidates: {}\n", native_set.len()));
+    report.push_str(&format!("Shell candidates: {}\n", shell_set.len()));
+    report.push_str(&format!("Missing in shell: {missing_in_shell}\n"));
+    report.push_str(&format!("Missing in native: {missing_in_native}\n"));
+    report.push_str(&format!(
+        "Parity result: {}\n",
+        if perfect_match { "OK" } else { "MISMATCH" }
+    ));
+
+    Ok(CommandTextResponse {
+        ok: perfect_match,
+        stdout: report,
+        stderr: if perfect_match {
+            String::new()
+        } else {
+            "Dual parity detectó diferencias entre shell y Rust.".to_string()
+        },
+    })
+}
+
+#[cfg(feature = "native-clean")]
+fn run_cleaning_native(selected: &[String]) -> Result<CommandTextResponse, String> {
+    let categories = build_scan_categories()?;
+    let plan = build_clean_plan(selected)?;
+    let log_path = clean_log_file_path()?;
+
+    let _ = append_clean_log(
+        &log_path,
+        &CleanLogEvent {
+            ts_epoch_secs: unix_timestamp_secs(),
+            event: "start".to_string(),
+            category: None,
+            path: None,
+            status: "ok".to_string(),
+            reclaimed_kb: 0,
+            error: None,
+            detail: Some(format!("selected_categories={}", selected.join(","))),
+        },
+    );
+
+    let mut reclaimed_total_kb = 0_u64;
+    let mut items = Vec::new();
+
+    for item in plan {
+        let category = match category_by_id(&categories, &item.category) {
+            Some(category) => category,
+            None => {
+                items.push(NativeCleanItemResult {
+                    category: item.category.clone(),
+                    path: item.path.display().to_string(),
+                    deleted: false,
+                    reclaimed_kb: 0,
+                    error: Some("Categoría no encontrada en configuración".to_string()),
+                });
+                continue;
+            }
+        };
+
+        let path_display = item.path.display().to_string();
+        let _ = append_clean_log(
+            &log_path,
+            &CleanLogEvent {
+                ts_epoch_secs: unix_timestamp_secs(),
+                event: "candidate".to_string(),
+                category: Some(item.category.clone()),
+                path: Some(path_display.clone()),
+                status: "ok".to_string(),
+                reclaimed_kb: 0,
+                error: None,
+                detail: None,
+            },
+        );
+
+        let meta = match fs::symlink_metadata(&item.path) {
+            Ok(meta) => meta,
+            Err(err) => {
+                let message = format!("No se pudo leer candidato: {err}");
+                let _ = append_clean_log(
+                    &log_path,
+                    &CleanLogEvent {
+                        ts_epoch_secs: unix_timestamp_secs(),
+                        event: "delete_error".to_string(),
+                        category: Some(item.category.clone()),
+                        path: Some(path_display.clone()),
+                        status: "error".to_string(),
+                        reclaimed_kb: 0,
+                        error: Some(message.clone()),
+                        detail: None,
+                    },
+                );
+                items.push(NativeCleanItemResult {
+                    category: item.category.clone(),
+                    path: path_display,
+                    deleted: false,
+                    reclaimed_kb: 0,
+                    error: Some(message),
+                });
+                continue;
+            }
+        };
+
+        if meta.file_type().is_symlink() {
+            let message = "Candidato omitido por ser symlink".to_string();
+            let _ = append_clean_log(
+                &log_path,
+                &CleanLogEvent {
+                    ts_epoch_secs: unix_timestamp_secs(),
+                    event: "delete_error".to_string(),
+                    category: Some(item.category.clone()),
+                    path: Some(path_display.clone()),
+                    status: "skipped".to_string(),
+                    reclaimed_kb: 0,
+                    error: Some(message.clone()),
+                    detail: None,
+                },
+            );
+            items.push(NativeCleanItemResult {
+                category: item.category.clone(),
+                path: path_display,
+                deleted: false,
+                reclaimed_kb: 0,
+                error: Some(message),
+            });
+            continue;
+        }
+
+        if !is_older_than(&meta, category.age_days) {
+            let message = "Candidato omitido por antigüedad reciente".to_string();
+            let _ = append_clean_log(
+                &log_path,
+                &CleanLogEvent {
+                    ts_epoch_secs: unix_timestamp_secs(),
+                    event: "delete_error".to_string(),
+                    category: Some(item.category.clone()),
+                    path: Some(path_display.clone()),
+                    status: "skipped".to_string(),
+                    reclaimed_kb: 0,
+                    error: Some(message.clone()),
+                    detail: None,
+                },
+            );
+            items.push(NativeCleanItemResult {
+                category: item.category.clone(),
+                path: path_display,
+                deleted: false,
+                reclaimed_kb: 0,
+                error: Some(message),
+            });
+            continue;
+        }
+
+        let delete_result = if meta.is_file() {
+            fs::remove_file(&item.path)
+        } else if meta.is_dir() {
+            fs::remove_dir_all(&item.path)
+        } else {
+            Err(std::io::Error::other("Tipo de candidato no soportado"))
+        };
+
+        match delete_result {
+            Ok(_) => {
+                reclaimed_total_kb += item.size_kb;
+                let _ = append_clean_log(
+                    &log_path,
+                    &CleanLogEvent {
+                        ts_epoch_secs: unix_timestamp_secs(),
+                        event: "delete_ok".to_string(),
+                        category: Some(item.category.clone()),
+                        path: Some(path_display.clone()),
+                        status: "ok".to_string(),
+                        reclaimed_kb: item.size_kb,
+                        error: None,
+                        detail: None,
+                    },
+                );
+                items.push(NativeCleanItemResult {
+                    category: item.category,
+                    path: path_display,
+                    deleted: true,
+                    reclaimed_kb: item.size_kb,
+                    error: None,
+                });
+            }
+            Err(err) => {
+                let message = format!("No se pudo eliminar candidato: {err}");
+                let _ = append_clean_log(
+                    &log_path,
+                    &CleanLogEvent {
+                        ts_epoch_secs: unix_timestamp_secs(),
+                        event: "delete_error".to_string(),
+                        category: Some(item.category.clone()),
+                        path: Some(path_display.clone()),
+                        status: "error".to_string(),
+                        reclaimed_kb: 0,
+                        error: Some(message.clone()),
+                        detail: None,
+                    },
+                );
+                items.push(NativeCleanItemResult {
+                    category: item.category,
+                    path: path_display,
+                    deleted: false,
+                    reclaimed_kb: 0,
+                    error: Some(message),
+                });
+            }
+        }
+    }
+
+    let _ = append_clean_log(
+        &log_path,
+        &CleanLogEvent {
+            ts_epoch_secs: unix_timestamp_secs(),
+            event: "end".to_string(),
+            category: None,
+            path: None,
+            status: "ok".to_string(),
+            reclaimed_kb: reclaimed_total_kb,
+            error: None,
+            detail: Some("native_clean_completed".to_string()),
+        },
+    );
+
+    let response = NativeCleanResponse {
+        ok: true,
+        mode: "clean".to_string(),
+        processed_categories: selected.to_vec(),
+        reclaimed_total_kb,
+        reclaimed_total_human: human_size_kb(reclaimed_total_kb),
+        items,
+        log_file: log_path.display().to_string(),
+    };
+
+    let stdout = serde_json::to_string_pretty(&response)
+        .map_err(|err| format!("No se pudo serializar respuesta de limpieza nativa: {err}"))?;
+
+    Ok(CommandTextResponse {
+        ok: true,
+        stdout,
+        stderr: String::new(),
+    })
 }
 
 #[tauri::command]
@@ -382,15 +821,7 @@ pub fn dry_run_cleaning(categories: Vec<String>) -> Result<DryRunResponse, Strin
         categories,
         "Selecciona al menos una categoría para ejecutar dry-run.",
     )?;
-
-    let selected_set: HashSet<&str> = selected.iter().map(String::as_str).collect();
-    let mut candidates = Vec::new();
-
-    for category in build_scan_categories()? {
-        if selected_set.contains(category.id) {
-            candidates.extend(collect_dry_run_candidates(&category));
-        }
-    }
+    let candidates = build_dry_run_candidates(&selected)?;
 
     Ok(DryRunResponse {
         version: "2.1.0-rust-dry-run".to_string(),
@@ -401,11 +832,22 @@ pub fn dry_run_cleaning(categories: Vec<String>) -> Result<DryRunResponse, Strin
 
 #[tauri::command]
 pub fn run_cleaning(categories: Vec<String>) -> Result<CommandTextResponse, String> {
-    let categories_csv = validate_and_normalize_categories(
+    let selected = validate_and_normalize_categories(
         categories,
         "Selecciona al menos una categoría para limpiar.",
-    )?
-    .join(",");
+    )?;
+
+    #[cfg(feature = "native-clean")]
+    {
+        if bool_env_enabled(DUAL_PARITY_FLAG) {
+            return run_cleaning_parity_mode(&selected);
+        }
+        if bool_env_enabled(NATIVE_CLEAN_FLAG) {
+            return run_cleaning_native(&selected);
+        }
+    }
+
+    let categories_csv = selected.join(",");
     let args = vec![
         "clean".to_string(),
         "--yes".to_string(),
@@ -518,5 +960,19 @@ mod tests {
         assert_eq!(parse_threshold_to_bytes("5G"), Some(5 * 1024 * 1024 * 1024));
         assert_eq!(parse_threshold_to_bytes("100K"), None);
         assert_eq!(parse_threshold_to_bytes("abc"), None);
+    }
+
+    #[test]
+    fn category_validation_deduplicates_ids() {
+        let result = validate_and_normalize_categories(
+            vec![
+                "tmp".to_string(),
+                "user_logs".to_string(),
+                "tmp".to_string(),
+            ],
+            "empty",
+        )
+        .expect("validation should succeed");
+        assert_eq!(result, vec!["tmp".to_string(), "user_logs".to_string()]);
     }
 }
