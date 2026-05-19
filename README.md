@@ -44,3 +44,8 @@ La documentación interna de arquitectura, seguridad y roadmap se mantiene fuera
 ## License
 
 Este proyecto se distribuye bajo licencia **GNU AGPL-3.0**. Consulta el archivo `LICENSE` para los términos completos.
+
+## Release and Distribution Docs
+
+- `RELEASE_NOTES_v0.1.0.md`
+- `docs/MACOS_SIGNING_NOTARIZATION_CHECKLIST.md`
