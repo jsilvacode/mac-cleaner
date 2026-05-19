@@ -51,6 +51,28 @@ pub struct CommandTextResponse {
     pub stderr: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CleanHistoryEntry {
+    pub run_id: String,
+    pub started_at_epoch_secs: u64,
+    pub ended_at_epoch_secs: Option<u64>,
+    pub status: String,
+    pub selected_categories: Vec<String>,
+    pub candidate_count: u64,
+    pub deleted_count: u64,
+    pub error_count: u64,
+    pub reclaimed_total_kb: u64,
+    pub reclaimed_total_human: String,
+    pub log_file: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ExportReportResponse {
+    pub ok: bool,
+    pub report_path: String,
+    pub exported_runs: usize,
+}
+
 const ALLOWED_CATEGORIES: [&str; 4] = ["user_cache", "user_logs", "trash", "tmp"];
 #[cfg(feature = "native-clean")]
 const DUAL_PARITY_FLAG: &str = "MAC_CLEANER_DUAL_PARITY";
@@ -60,6 +82,8 @@ const FORCE_SHELL_FLAG: &str = "MAC_CLEANER_FORCE_SHELL";
 const CLEAN_LOG_SUBDIR: &str = "Library/Logs/mac_cleaner_tauri_agent";
 #[cfg(feature = "native-clean")]
 const CLEAN_LOG_FILE: &str = "run-native-clean.jsonl";
+#[cfg(feature = "native-clean")]
+const CLEAN_REPORTS_SUBDIR: &str = "Library/Logs/mac_cleaner_tauri_agent/reports";
 
 struct ScanCategory {
     id: &'static str,
@@ -100,7 +124,7 @@ struct NativeCleanResponse {
 }
 
 #[cfg(feature = "native-clean")]
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct CleanLogEvent {
     ts_epoch_secs: u64,
     event: String,
@@ -110,6 +134,19 @@ struct CleanLogEvent {
     reclaimed_kb: u64,
     error: Option<String>,
     detail: Option<String>,
+}
+
+#[cfg(feature = "native-clean")]
+#[derive(Debug)]
+struct CleanHistoryBuilder {
+    started_at_epoch_secs: u64,
+    ended_at_epoch_secs: Option<u64>,
+    status: String,
+    selected_categories: Vec<String>,
+    candidate_count: u64,
+    deleted_count: u64,
+    error_count: u64,
+    reclaimed_total_kb: u64,
 }
 
 fn script_path() -> Result<PathBuf, String> {
@@ -194,6 +231,174 @@ fn append_clean_log(path: &PathBuf, event: &CleanLogEvent) -> Result<(), String>
     file.write_all(b"\n")
         .map_err(|err| format!("No se pudo finalizar línea de log: {err}"))?;
     Ok(())
+}
+
+#[cfg(feature = "native-clean")]
+fn clean_reports_dir_path() -> Result<PathBuf, String> {
+    let home = resolve_home()?;
+    Ok(home.join(CLEAN_REPORTS_SUBDIR))
+}
+
+#[cfg(feature = "native-clean")]
+fn parse_selected_categories(detail: Option<&str>) -> Vec<String> {
+    let Some(raw) = detail else {
+        return Vec::new();
+    };
+    let Some(csv) = raw.strip_prefix("selected_categories=") else {
+        return Vec::new();
+    };
+
+    csv.split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty() && ALLOWED_CATEGORIES.contains(item))
+        .map(ToString::to_string)
+        .collect()
+}
+
+#[cfg(feature = "native-clean")]
+fn finalize_history_run(
+    runs: &mut Vec<CleanHistoryEntry>,
+    builder: CleanHistoryBuilder,
+    log_path: &PathBuf,
+) {
+    let run_id = format!("native-{}-{}", builder.started_at_epoch_secs, runs.len() + 1);
+    runs.push(CleanHistoryEntry {
+        run_id,
+        started_at_epoch_secs: builder.started_at_epoch_secs,
+        ended_at_epoch_secs: builder.ended_at_epoch_secs,
+        status: builder.status,
+        selected_categories: builder.selected_categories,
+        candidate_count: builder.candidate_count,
+        deleted_count: builder.deleted_count,
+        error_count: builder.error_count,
+        reclaimed_total_kb: builder.reclaimed_total_kb,
+        reclaimed_total_human: human_size_kb(builder.reclaimed_total_kb),
+        log_file: log_path.display().to_string(),
+    });
+}
+
+#[cfg(feature = "native-clean")]
+fn collect_clean_history(limit: usize) -> Result<Vec<CleanHistoryEntry>, String> {
+    let log_path = clean_log_file_path()?;
+    if !log_path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let raw = fs::read_to_string(&log_path).map_err(|err| {
+        format!(
+            "No se pudo leer historial de limpieza en {}: {err}",
+            log_path.display()
+        )
+    })?;
+
+    let mut runs: Vec<CleanHistoryEntry> = Vec::new();
+    let mut current: Option<CleanHistoryBuilder> = None;
+
+    for line in raw.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(event) = serde_json::from_str::<CleanLogEvent>(line) else {
+            continue;
+        };
+
+        match event.event.as_str() {
+            "start" => {
+                if let Some(builder) = current.take() {
+                    finalize_history_run(&mut runs, builder, &log_path);
+                }
+                current = Some(CleanHistoryBuilder {
+                    started_at_epoch_secs: event.ts_epoch_secs,
+                    ended_at_epoch_secs: None,
+                    status: "running".to_string(),
+                    selected_categories: parse_selected_categories(event.detail.as_deref()),
+                    candidate_count: 0,
+                    deleted_count: 0,
+                    error_count: 0,
+                    reclaimed_total_kb: 0,
+                });
+            }
+            "candidate" => {
+                if let Some(builder) = current.as_mut() {
+                    builder.candidate_count += 1;
+                }
+            }
+            "delete_ok" => {
+                if let Some(builder) = current.as_mut() {
+                    builder.deleted_count += 1;
+                    builder.reclaimed_total_kb += event.reclaimed_kb;
+                }
+            }
+            "delete_error" => {
+                if let Some(builder) = current.as_mut() {
+                    builder.error_count += 1;
+                }
+            }
+            "end" => {
+                if let Some(mut builder) = current.take() {
+                    builder.ended_at_epoch_secs = Some(event.ts_epoch_secs);
+                    builder.status = event.status;
+                    if event.reclaimed_kb > 0 {
+                        builder.reclaimed_total_kb = event.reclaimed_kb;
+                    }
+                    finalize_history_run(&mut runs, builder, &log_path);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(mut builder) = current {
+        builder.status = "incomplete".to_string();
+        finalize_history_run(&mut runs, builder, &log_path);
+    }
+
+    runs.sort_by(|a, b| b.started_at_epoch_secs.cmp(&a.started_at_epoch_secs));
+    if runs.len() > limit {
+        runs.truncate(limit);
+    }
+
+    Ok(runs)
+}
+
+#[cfg(feature = "native-clean")]
+fn build_history_markdown_report(entries: &[CleanHistoryEntry]) -> String {
+    let mut report = String::new();
+    report.push_str("# Mac Cleaner Native History Report\n\n");
+    report.push_str(&format!("Generated at epoch: `{}`\n\n", unix_timestamp_secs()));
+
+    if entries.is_empty() {
+        report.push_str("No hay ejecuciones nativas registradas.\n");
+        return report;
+    }
+
+    for entry in entries {
+        let selected = if entry.selected_categories.is_empty() {
+            "none".to_string()
+        } else {
+            entry.selected_categories.join(", ")
+        };
+        report.push_str(&format!("## {}\n\n", entry.run_id));
+        report.push_str(&format!("- Status: `{}`\n", entry.status));
+        report.push_str(&format!(
+            "- Started (epoch): `{}`\n",
+            entry.started_at_epoch_secs
+        ));
+        report.push_str(&format!(
+            "- Ended (epoch): `{}`\n",
+            entry.ended_at_epoch_secs
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "n/a".to_string())
+        ));
+        report.push_str(&format!("- Categories: `{selected}`\n"));
+        report.push_str(&format!("- Candidates: `{}`\n", entry.candidate_count));
+        report.push_str(&format!("- Deleted: `{}`\n", entry.deleted_count));
+        report.push_str(&format!("- Errors/Skipped: `{}`\n", entry.error_count));
+        report.push_str(&format!(
+            "- Reclaimed: `{}` (`{} KB`)\n",
+            entry.reclaimed_total_human, entry.reclaimed_total_kb
+        ));
+        report.push_str(&format!("- Log file: `{}`\n\n", entry.log_file));
+    }
+
+    report
 }
 
 fn build_scan_categories() -> Result<Vec<ScanCategory>, String> {
@@ -907,6 +1112,52 @@ pub fn get_top_dirs() -> Result<CommandTextResponse, String> {
         stdout: format_top_dirs_output(&home, &rows),
         stderr: String::new(),
     })
+}
+
+#[tauri::command]
+pub fn get_clean_history(limit: Option<u32>) -> Result<Vec<CleanHistoryEntry>, String> {
+    #[cfg(feature = "native-clean")]
+    {
+        let max_limit = 200_u32;
+        let requested = limit.unwrap_or(20).clamp(1, max_limit);
+        return collect_clean_history(requested as usize);
+    }
+
+    #[cfg(not(feature = "native-clean"))]
+    {
+        let _ = limit;
+        Err("Historial nativo no disponible: feature native-clean desactivado.".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn export_clean_history_report(limit: Option<u32>) -> Result<ExportReportResponse, String> {
+    #[cfg(feature = "native-clean")]
+    {
+        let max_limit = 200_u32;
+        let requested = limit.unwrap_or(20).clamp(1, max_limit);
+        let history = collect_clean_history(requested as usize)?;
+        let report_text = build_history_markdown_report(&history);
+        let reports_dir = clean_reports_dir_path()?;
+        fs::create_dir_all(&reports_dir)
+            .map_err(|err| format!("No se pudo crear directorio de reportes: {err}"))?;
+
+        let report_path = reports_dir.join(format!("history-report-{}.md", unix_timestamp_secs()));
+        fs::write(&report_path, report_text)
+            .map_err(|err| format!("No se pudo escribir reporte de historial: {err}"))?;
+
+        return Ok(ExportReportResponse {
+            ok: true,
+            report_path: report_path.display().to_string(),
+            exported_runs: history.len(),
+        });
+    }
+
+    #[cfg(not(feature = "native-clean"))]
+    {
+        let _ = limit;
+        Err("Exportación no disponible: feature native-clean desactivado.".to_string())
+    }
 }
 
 #[cfg(test)]

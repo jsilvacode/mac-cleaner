@@ -45,6 +45,14 @@ El frontend nunca borra archivos. El frontend solicita acciones al backend Rust.
 - `get_top_dirs`: Rust nativo
 - `run_cleaning`: Rust nativo por defecto (con fallback shell controlado por `MAC_CLEANER_FORCE_SHELL=1`)
 - `MAC_CLEANER_DUAL_PARITY=1`: activa simulación de paridad Rust vs Shell (sin borrado)
+- `get_clean_history`: historial local desde logs JSONL nativos
+- `export_clean_history_report`: exporta reporte Markdown del historial local
+
+## Phase 4 (in progress)
+
+- Historial local integrado en backend y UI.
+- Exportación de reporte de historial a `~/Library/Logs/mac_cleaner_tauri_agent/reports/`.
+- Preferencias locales iniciales (categorías por defecto y threshold de archivos grandes).
 
 ## Interface direction
 
