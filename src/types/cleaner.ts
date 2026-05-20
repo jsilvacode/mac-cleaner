@@ -64,6 +64,63 @@ export interface PruneHistoryResponse {
   log_file: string;
 }
 
+export interface InstalledAppItem {
+  id: string;
+  name: string;
+  path: string;
+  scope: "system" | "user" | string;
+  size_kb: number;
+  size_human: string;
+  removable: boolean;
+  reason: string;
+}
+
+export interface InstalledAppsResponse {
+  version: string;
+  mode: "scan";
+  items: InstalledAppItem[];
+}
+
+export interface AppUninstallPlanItem {
+  id: string;
+  name: string;
+  path: string;
+  destination_hint: string;
+  size_kb: number;
+  size_human: string;
+  risk: string;
+}
+
+export interface AppUninstallPlanResponse {
+  version: string;
+  mode: "review";
+  items: AppUninstallPlanItem[];
+  skipped: InstalledAppItem[];
+  total_kb: number;
+  total_human: string;
+}
+
+export interface AppUninstallResultItem {
+  id: string;
+  name: string;
+  source_path: string;
+  destination_path: string | null;
+  moved_to_trash: boolean;
+  moved_size_kb: number;
+  moved_size_human: string;
+  error: string | null;
+}
+
+export interface AppUninstallResponse {
+  ok: boolean;
+  mode: "move-to-trash";
+  moved_count: number;
+  skipped_count: number;
+  moved_total_kb: number;
+  moved_total_human: string;
+  items: AppUninstallResultItem[];
+}
+
 export type LargeFilesThreshold = "500M" | "1G" | "2G" | "5G";
 
 export interface CleaningPreferences {

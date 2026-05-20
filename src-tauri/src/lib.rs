@@ -9,6 +9,9 @@ pub fn run() {
             cleaner::run_cleaning,
             cleaner::find_large_files,
             cleaner::get_top_dirs,
+            cleaner::scan_installed_apps,
+            cleaner::prepare_app_uninstall,
+            cleaner::uninstall_apps_to_trash,
             cleaner::get_clean_history,
             cleaner::export_clean_history_report,
             cleaner::apply_clean_history_retention

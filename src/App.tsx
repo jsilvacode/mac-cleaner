@@ -26,14 +26,19 @@ import {
   findLargeFiles,
   getCleanHistory,
   getTopDirs,
+  prepareAppUninstall,
   runCleaning,
   scanCleanable,
+  scanInstalledApps,
+  uninstallAppsToTrash,
 } from "./services/cleanerApi";
 import type {
+  AppUninstallPlanResponse,
   CleanCategory,
   CleanHistoryEntry,
   CleaningPreferences,
   DryRunResponse,
+  InstalledAppItem,
   LargeFilesThreshold,
   RiskLevel,
   ScanResponse,
@@ -153,6 +158,10 @@ export default function App() {
   const [historyFromDate, setHistoryFromDate] = useState<string>("");
   const [historyToDate, setHistoryToDate] = useState<string>("");
   const [historySort, setHistorySort] = useState<HistorySort>("date_desc");
+  const [installedApps, setInstalledApps] = useState<InstalledAppItem[]>([]);
+  const [appsLoaded, setAppsLoaded] = useState(false);
+  const [selectedAppIds, setSelectedAppIds] = useState<string[]>([]);
+  const [appUninstallPlan, setAppUninstallPlan] = useState<AppUninstallPlanResponse | null>(null);
   const [preferences, setPreferences] = useState<CleaningPreferences>(() => loadPreferences());
   const [output, setOutput] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -168,9 +177,16 @@ export default function App() {
     }
   }, [view, historyLoaded]);
 
+  useEffect(() => {
+    if (view === "uninstall" && !appsLoaded) {
+      void loadInstalledApps();
+    }
+  }, [view, appsLoaded]);
+
   const totalKb = useMemo(() => scan?.items.reduce((sum, item) => sum + item.estimated_kb, 0) ?? 0, [scan]);
   const safeItems = scan?.items.filter((item) => item.risk === "bajo").length ?? 0;
   const reviewItems = scan?.items.filter((item) => item.risk !== "bajo").length ?? 0;
+  const removableApps = useMemo(() => installedApps.filter((app) => app.removable), [installedApps]);
 
   const filteredHistoryItems = useMemo(() => {
     const byDateRange = historyItems.filter((entry) => {
@@ -235,12 +251,32 @@ export default function App() {
     });
   }
 
+  async function loadInstalledApps() {
+    await runAction(scanInstalledApps, (data) => {
+      setInstalledApps(data.items);
+      setAppsLoaded(true);
+      setAppUninstallPlan(null);
+      setSelectedAppIds((current) => current.filter((id) => data.items.some((app) => app.id === id && app.removable)));
+    });
+  }
+
   function toggleCategory(category: CleanCategory) {
     setSelectedCategories((current) => {
       const next = current.includes(category) ? current.filter((item) => item !== category) : [...current, category];
       return next;
     });
     setDryRun(null);
+  }
+
+  function toggleAppSelection(app: InstalledAppItem) {
+    if (!app.removable) {
+      return;
+    }
+    setSelectedAppIds((current) => {
+      const next = current.includes(app.id) ? current.filter((id) => id !== app.id) : [...current, app.id];
+      return next;
+    });
+    setAppUninstallPlan(null);
   }
 
   function toggleDefaultCategory(category: CleanCategory) {
@@ -319,6 +355,37 @@ export default function App() {
     setHistoryFromDate("");
     setHistoryToDate("");
     setHistorySort("date_desc");
+  }
+
+  function prepareSelectedAppsForUninstall() {
+    if (selectedAppIds.length === 0) {
+      setError("Elige al menos una app para preparar el retiro.");
+      return;
+    }
+    runAction(() => prepareAppUninstall(selectedAppIds), setAppUninstallPlan);
+  }
+
+  function runAppUninstall() {
+    if (!appUninstallPlan || appUninstallPlan.items.length === 0) {
+      setError("Primero revisa las apps antes de retirarlas.");
+      return;
+    }
+
+    const appNames = appUninstallPlan.items.map((item) => item.name).join(", ");
+    const ok = window.confirm(
+      `Mac Cleaner moverá a la Papelera: ${appNames}. No eliminará documentos personales ni datos de otras ubicaciones. ¿Continuar?`,
+    );
+    if (!ok) {
+      return;
+    }
+
+    const idsToMove = appUninstallPlan.items.map((item) => item.id);
+    runAction(() => uninstallAppsToTrash(idsToMove), (data) => {
+      setOutput(`Apps movidas a la Papelera: ${data.moved_count}. Tamaño trasladado: ${data.moved_total_human}. Omitidas: ${data.skipped_count}.`);
+      setSelectedAppIds([]);
+      setAppUninstallPlan(null);
+      setAppsLoaded(false);
+    });
   }
 
   return (
@@ -419,14 +486,14 @@ export default function App() {
                 {view === "files" && "Encuentra lo que ocupa más."}
                 {view === "history" && "Tu actividad reciente."}
                 {view === "settings" && "Cuidado a tu medida."}
-                {view === "uninstall" && "Retira los datos de la app con calma."}
+                {view === "uninstall" && "Desinstala apps con calma."}
               </h1>
             </div>
             <span>
               {view === "files" && "Solo revisión, sin borrar."}
               {view === "history" && `${historyItems.length} actividades guardadas.`}
               {view === "settings" && "Guardado en este Mac."}
-              {view === "uninstall" && "Sin tocar archivos personales."}
+              {view === "uninstall" && "A la Papelera, sin tocar archivos personales."}
             </span>
           </motion.section>
         )}
@@ -638,29 +705,101 @@ export default function App() {
           <>
             <section className="section-heading">
               <div>
-                <p className="eyebrow muted">Datos de Mac Cleaner</p>
-                <h2>Desinstalación guiada</h2>
+                <p className="eyebrow muted">Apps instaladas</p>
+                <h2>Retiro seguro</h2>
               </div>
-              <span>Preparado para revisión segura</span>
+              <span>{removableApps.length} apps disponibles para revisar</span>
             </section>
 
             <section className="uninstall-preview">
               <article className="uninstall-panel">
                 <div className="metric-icon"><ShieldCheck size={19} /></div>
-                <h3>Primero revisaremos datos de la app</h3>
-                <p>Preferencias, actividad, resúmenes y caché propia se mostrarán por separado antes de eliminar algo.</p>
+                <h3>Primero revisamos</h3>
+                <p>Mac Cleaner solo ofrece apps encontradas en ubicaciones permitidas: Aplicaciones del sistema y del usuario.</p>
               </article>
               <article className="uninstall-panel">
                 <div className="metric-icon"><Trash2 size={19} /></div>
-                <h3>Tú decides qué conservar</h3>
-                <p>La limpieza de datos propios llegará en el siguiente paso con confirmación y registro de resultados.</p>
+                <h3>Retiro reversible</h3>
+                <p>La app seleccionada se mueve a la Papelera. Si cambias de opinión, puedes restaurarla antes de vaciarla.</p>
               </article>
               <article className="uninstall-panel">
                 <div className="metric-icon"><Files size={19} /></div>
-                <h3>Tus archivos no se tocarán</h3>
-                <p>La app solo podrá revisar ubicaciones propias de Mac Cleaner. Nada de otras apps ni documentos personales.</p>
+                <h3>Tus archivos quedan quietos</h3>
+                <p>No se eliminan documentos personales, preferencias, contenedores ni datos internos de otras ubicaciones.</p>
               </article>
             </section>
+
+            <section className="glass-panel uninstall-workspace">
+              <div className="panel-heading">
+                <h2>Apps detectadas</h2>
+                <span>{selectedAppIds.length} seleccionadas</span>
+              </div>
+
+              <div className="command-strip">
+                <button disabled={loading} onClick={() => void loadInstalledApps()}>
+                  <Search size={17} /> Revisar apps
+                </button>
+                <button disabled={loading || selectedAppIds.length === 0} onClick={prepareSelectedAppsForUninstall}>
+                  <ShieldCheck size={17} /> Preparar retiro
+                </button>
+                <button disabled={loading || !appUninstallPlan || appUninstallPlan.items.length === 0} className="danger-action" onClick={runAppUninstall}>
+                  <Trash2 size={17} /> Mover a la Papelera
+                </button>
+              </div>
+
+              <div className="apps-list">
+                {installedApps.map((app) => (
+                  <article
+                    className="app-row"
+                    key={app.id}
+                    data-selected={selectedAppIds.includes(app.id)}
+                    data-disabled={!app.removable}
+                    onClick={() => toggleAppSelection(app)}
+                  >
+                    <div>
+                      <strong>{app.name}</strong>
+                      <span>{app.scope === "user" ? "Instalada para este usuario" : "En Aplicaciones"}</span>
+                    </div>
+                    <div className="app-row-meta">
+                      <span>{app.size_human}</span>
+                      <small>{app.reason}</small>
+                    </div>
+                  </article>
+                ))}
+
+                {installedApps.length === 0 && (
+                  <div className="empty-state compact">
+                    <Trash2 size={28} />
+                    <h3>Sin apps revisadas todavía</h3>
+                    <p>Inicia una revisión para ver las apps que pueden retirarse de forma segura.</p>
+                  </div>
+                )}
+              </div>
+            </section>
+
+            {appUninstallPlan && (
+              <section className="glass-panel">
+                <div className="panel-heading">
+                  <h2>Revisión antes de retirar</h2>
+                  <span>{appUninstallPlan.total_human} se moverán a la Papelera</span>
+                </div>
+                <div className="dryrun-table uninstall-plan">
+                  {appUninstallPlan.items.map((item) => (
+                    <div className="dryrun-row" key={item.id}>
+                      <span>{item.size_human}</span>
+                      <span>{item.destination_hint}</span>
+                      <code>{item.path}</code>
+                    </div>
+                  ))}
+                </div>
+
+                {appUninstallPlan.skipped.length > 0 && (
+                  <div className="skip-note">
+                    {appUninstallPlan.skipped.length} apps fueron omitidas por seguridad.
+                  </div>
+                )}
+              </section>
+            )}
           </>
         )}
 

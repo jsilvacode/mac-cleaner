@@ -5,6 +5,9 @@ import type {
   CommandTextResponse,
   DryRunResponse,
   ExportReportResponse,
+  AppUninstallPlanResponse,
+  AppUninstallResponse,
+  InstalledAppsResponse,
   LargeFilesThreshold,
   PruneHistoryResponse,
   ScanResponse,
@@ -40,4 +43,16 @@ export async function exportCleanHistoryReport(limit = 20): Promise<ExportReport
 
 export async function applyCleanHistoryRetention(retentionDays: number): Promise<PruneHistoryResponse> {
   return invoke<PruneHistoryResponse>("apply_clean_history_retention", { retentionDays });
+}
+
+export async function scanInstalledApps(): Promise<InstalledAppsResponse> {
+  return invoke<InstalledAppsResponse>("scan_installed_apps");
+}
+
+export async function prepareAppUninstall(appIds: string[]): Promise<AppUninstallPlanResponse> {
+  return invoke<AppUninstallPlanResponse>("prepare_app_uninstall", { appIds });
+}
+
+export async function uninstallAppsToTrash(appIds: string[]): Promise<AppUninstallResponse> {
+  return invoke<AppUninstallResponse>("uninstall_apps_to_trash", { appIds });
 }

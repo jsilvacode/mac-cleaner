@@ -6,7 +6,7 @@ use std::fs;
 use std::fs::OpenOptions;
 #[cfg(feature = "native-clean")]
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime};
 
@@ -81,7 +81,74 @@ pub struct PruneHistoryResponse {
     pub log_file: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct InstalledAppItem {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    pub scope: String,
+    pub size_kb: u64,
+    pub size_human: String,
+    pub removable: bool,
+    pub reason: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct InstalledAppsResponse {
+    pub version: String,
+    pub mode: String,
+    pub items: Vec<InstalledAppItem>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AppUninstallPlanItem {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    pub destination_hint: String,
+    pub size_kb: u64,
+    pub size_human: String,
+    pub risk: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AppUninstallPlanResponse {
+    pub version: String,
+    pub mode: String,
+    pub items: Vec<AppUninstallPlanItem>,
+    pub skipped: Vec<InstalledAppItem>,
+    pub total_kb: u64,
+    pub total_human: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AppUninstallResultItem {
+    pub id: String,
+    pub name: String,
+    pub source_path: String,
+    pub destination_path: Option<String>,
+    pub moved_to_trash: bool,
+    pub moved_size_kb: u64,
+    pub moved_size_human: String,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AppUninstallResponse {
+    pub ok: bool,
+    pub mode: String,
+    pub moved_count: usize,
+    pub skipped_count: usize,
+    pub moved_total_kb: u64,
+    pub moved_total_human: String,
+    pub items: Vec<AppUninstallResultItem>,
+}
+
 const ALLOWED_CATEGORIES: [&str; 4] = ["user_cache", "user_logs", "trash", "tmp"];
+const APP_MIN_AGE_DAYS: u32 = 1;
+const SYSTEM_APPLICATIONS_DIR: &str = "/Applications";
+const USER_APPLICATIONS_SUBDIR: &str = "Applications";
+const APP_TRASH_SUBDIR: &str = ".Trash/Mac Cleaner Apps";
 #[cfg(feature = "native-clean")]
 const DUAL_PARITY_FLAG: &str = "MAC_CLEANER_DUAL_PARITY";
 #[cfg(feature = "native-clean")]
@@ -269,7 +336,11 @@ fn finalize_history_run(
     builder: CleanHistoryBuilder,
     log_path: &PathBuf,
 ) {
-    let run_id = format!("native-{}-{}", builder.started_at_epoch_secs, runs.len() + 1);
+    let run_id = format!(
+        "native-{}-{}",
+        builder.started_at_epoch_secs,
+        runs.len() + 1
+    );
     runs.push(CleanHistoryEntry {
         run_id,
         started_at_epoch_secs: builder.started_at_epoch_secs,
@@ -370,7 +441,10 @@ fn collect_clean_history(limit: usize) -> Result<Vec<CleanHistoryEntry>, String>
 fn build_history_markdown_report(entries: &[CleanHistoryEntry]) -> String {
     let mut report = String::new();
     report.push_str("# Mac Cleaner Native History Report\n\n");
-    report.push_str(&format!("Generated at epoch: `{}`\n\n", unix_timestamp_secs()));
+    report.push_str(&format!(
+        "Generated at epoch: `{}`\n\n",
+        unix_timestamp_secs()
+    ));
 
     if entries.is_empty() {
         report.push_str("No hay ejecuciones nativas registradas.\n");
@@ -391,7 +465,8 @@ fn build_history_markdown_report(entries: &[CleanHistoryEntry]) -> String {
         ));
         report.push_str(&format!(
             "- Ended (epoch): `{}`\n",
-            entry.ended_at_epoch_secs
+            entry
+                .ended_at_epoch_secs
                 .map(|v| v.to_string())
                 .unwrap_or_else(|| "n/a".to_string())
         ));
@@ -415,8 +490,12 @@ fn read_clean_log_lines(log_path: &PathBuf) -> Result<Vec<String>, String> {
         return Ok(Vec::new());
     }
 
-    let raw = fs::read_to_string(log_path)
-        .map_err(|err| format!("No se pudo leer log de limpieza en {}: {err}", log_path.display()))?;
+    let raw = fs::read_to_string(log_path).map_err(|err| {
+        format!(
+            "No se pudo leer log de limpieza en {}: {err}",
+            log_path.display()
+        )
+    })?;
     Ok(raw
         .lines()
         .filter(|line| !line.trim().is_empty())
@@ -431,13 +510,15 @@ fn split_runs_from_log_lines(lines: &[String]) -> Vec<(u64, Vec<String>)> {
     let mut current_lines: Vec<String> = Vec::new();
 
     for line in lines {
-        let maybe_start = serde_json::from_str::<CleanLogEvent>(line).ok().and_then(|event| {
-            if event.event == "start" {
-                Some(event.ts_epoch_secs)
-            } else {
-                None
-            }
-        });
+        let maybe_start = serde_json::from_str::<CleanLogEvent>(line)
+            .ok()
+            .and_then(|event| {
+                if event.event == "start" {
+                    Some(event.ts_epoch_secs)
+                } else {
+                    None
+                }
+            });
 
         if let Some(start_ts) = maybe_start {
             if let Some(existing_start) = current_start.take() {
@@ -571,6 +652,245 @@ fn human_size_kb(kb: u64) -> String {
     } else {
         format!("{kb} KB")
     }
+}
+
+fn app_roots() -> Result<Vec<(&'static str, PathBuf)>, String> {
+    let home = resolve_home()?;
+    Ok(vec![
+        ("system", PathBuf::from(SYSTEM_APPLICATIONS_DIR)),
+        ("user", home.join(USER_APPLICATIONS_SUBDIR)),
+    ])
+}
+
+fn app_id_for(scope: &str, file_name: &str) -> String {
+    format!("{scope}:{file_name}")
+}
+
+fn is_app_bundle(path: &Path) -> bool {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.eq_ignore_ascii_case("app"))
+        .unwrap_or(false)
+}
+
+fn protected_app_names() -> HashSet<&'static str> {
+    HashSet::from([
+        "App Store.app",
+        "Automator.app",
+        "Books.app",
+        "Calculator.app",
+        "Calendar.app",
+        "Chess.app",
+        "Contacts.app",
+        "Dictionary.app",
+        "FaceTime.app",
+        "Find My.app",
+        "Font Book.app",
+        "Freeform.app",
+        "Home.app",
+        "Image Capture.app",
+        "Launchpad.app",
+        "Mail.app",
+        "Maps.app",
+        "Messages.app",
+        "Mission Control.app",
+        "Music.app",
+        "News.app",
+        "Notes.app",
+        "Photo Booth.app",
+        "Photos.app",
+        "Podcasts.app",
+        "Preview.app",
+        "QuickTime Player.app",
+        "Reminders.app",
+        "Safari.app",
+        "Shortcuts.app",
+        "Stickies.app",
+        "Stocks.app",
+        "System Settings.app",
+        "TextEdit.app",
+        "Time Machine.app",
+        "TV.app",
+        "Voice Memos.app",
+        "Weather.app",
+    ])
+}
+
+fn app_removal_status(name: &str, meta: &fs::Metadata) -> (bool, String) {
+    if protected_app_names().contains(name) {
+        return (
+            false,
+            "App de macOS protegida por seguridad; no se ofrece retiro desde esta versión."
+                .to_string(),
+        );
+    }
+
+    if !is_older_than(meta, APP_MIN_AGE_DAYS) {
+        return (
+            false,
+            "Instalada o modificada recientemente; vuelve a revisarla más tarde por seguridad."
+                .to_string(),
+        );
+    }
+
+    (true, "Lista para retirar con confirmación.".to_string())
+}
+
+fn collect_installed_apps() -> Result<Vec<InstalledAppItem>, String> {
+    let roots = app_roots()?;
+    let mut items = Vec::new();
+
+    for (scope, root) in roots {
+        let Ok(entries) = fs::read_dir(&root) else {
+            continue;
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(meta) = fs::symlink_metadata(&path) else {
+                continue;
+            };
+
+            if meta.file_type().is_symlink() || !meta.is_dir() || !is_app_bundle(&path) {
+                continue;
+            }
+
+            let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            if file_name.contains('/') || file_name.contains(':') {
+                continue;
+            }
+
+            let display_name = file_name.trim_end_matches(".app").to_string();
+            let app_size_kb = size_kb(&path);
+            let (removable, reason) = app_removal_status(file_name, &meta);
+
+            items.push(InstalledAppItem {
+                id: app_id_for(scope, file_name),
+                name: display_name,
+                path: path.display().to_string(),
+                scope: scope.to_string(),
+                size_kb: app_size_kb,
+                size_human: human_size_kb(app_size_kb),
+                removable,
+                reason,
+            });
+        }
+    }
+
+    items.sort_by(|a, b| {
+        b.size_kb
+            .cmp(&a.size_kb)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    Ok(items)
+}
+
+fn validate_and_resolve_app_selection(
+    app_ids: Vec<String>,
+) -> Result<Vec<InstalledAppItem>, String> {
+    if app_ids.is_empty() {
+        return Err("Selecciona al menos una app para preparar el retiro.".to_string());
+    }
+    if app_ids.len() > 25 {
+        return Err(
+            "Selecciona menos apps por operación para mantener una revisión clara.".to_string(),
+        );
+    }
+
+    let known_apps = collect_installed_apps()?;
+    let requested: HashSet<String> = app_ids.into_iter().collect();
+    let mut selected = Vec::new();
+
+    for app_id in &requested {
+        if app_id.contains('/') || app_id.contains('\\') || !app_id.contains(':') {
+            return Err(format!("Identificador de app no permitido: {app_id}"));
+        }
+    }
+
+    for app in known_apps {
+        if requested.contains(&app.id) {
+            selected.push(app);
+        }
+    }
+
+    if selected.len() != requested.len() {
+        return Err("Una o más apps ya no están disponibles para retirar.".to_string());
+    }
+
+    selected.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(selected)
+}
+
+fn build_app_uninstall_plan(app_ids: Vec<String>) -> Result<AppUninstallPlanResponse, String> {
+    let selected = validate_and_resolve_app_selection(app_ids)?;
+    let mut items = Vec::new();
+    let mut skipped = Vec::new();
+    let mut total_kb = 0_u64;
+
+    for app in selected {
+        if !app.removable {
+            skipped.push(app);
+            continue;
+        }
+
+        total_kb += app.size_kb;
+        items.push(AppUninstallPlanItem {
+            id: app.id,
+            name: app.name,
+            path: app.path,
+            destination_hint: "Papelera del usuario".to_string(),
+            size_kb: app.size_kb,
+            size_human: app.size_human,
+            risk: "Reversible desde la Papelera".to_string(),
+        });
+    }
+
+    Ok(AppUninstallPlanResponse {
+        version: "0.1.0-app-uninstall".to_string(),
+        mode: "review".to_string(),
+        items,
+        skipped,
+        total_kb,
+        total_human: human_size_kb(total_kb),
+    })
+}
+
+fn unique_trash_destination(app_name: &str) -> Result<PathBuf, String> {
+    let home = resolve_home()?;
+    let trash_dir = home.join(APP_TRASH_SUBDIR);
+    fs::create_dir_all(&trash_dir)
+        .map_err(|err| format!("No se pudo preparar la Papelera para apps: {err}"))?;
+
+    let base = trash_dir.join(app_name);
+    if !base.exists() {
+        return Ok(base);
+    }
+
+    let timestamp = unix_timestamp_secs_unconditional();
+    for index in 1..=50 {
+        let candidate = trash_dir
+            .join(format!(
+                "{}-{}-{}",
+                app_name.trim_end_matches(".app"),
+                timestamp,
+                index
+            ))
+            .with_extension("app");
+        if !candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+
+    Err("No se pudo crear un destino único en la Papelera.".to_string())
+}
+
+fn unix_timestamp_secs_unconditional() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 fn parse_threshold_to_bytes(threshold: &str) -> Option<u64> {
@@ -1177,6 +1497,137 @@ pub fn get_top_dirs() -> Result<CommandTextResponse, String> {
 }
 
 #[tauri::command]
+pub fn scan_installed_apps() -> Result<InstalledAppsResponse, String> {
+    Ok(InstalledAppsResponse {
+        version: "0.1.0-app-uninstall".to_string(),
+        mode: "scan".to_string(),
+        items: collect_installed_apps()?,
+    })
+}
+
+#[tauri::command]
+pub fn prepare_app_uninstall(app_ids: Vec<String>) -> Result<AppUninstallPlanResponse, String> {
+    build_app_uninstall_plan(app_ids)
+}
+
+#[tauri::command]
+pub fn uninstall_apps_to_trash(app_ids: Vec<String>) -> Result<AppUninstallResponse, String> {
+    let plan = build_app_uninstall_plan(app_ids)?;
+    if plan.items.is_empty() {
+        return Err(
+            "No hay apps listas para retirar después de la revisión de seguridad.".to_string(),
+        );
+    }
+
+    let mut results = Vec::new();
+    let mut moved_total_kb = 0_u64;
+    let mut moved_count = 0_usize;
+    let mut skipped_count = plan.skipped.len();
+
+    for item in plan.items {
+        let source = PathBuf::from(&item.path);
+        let app_name = source
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| "No se pudo resolver el nombre de la app.".to_string())?;
+
+        let path_display = source.display().to_string();
+        let meta = match fs::symlink_metadata(&source) {
+            Ok(meta) => meta,
+            Err(err) => {
+                skipped_count += 1;
+                results.push(AppUninstallResultItem {
+                    id: item.id,
+                    name: item.name,
+                    source_path: path_display,
+                    destination_path: None,
+                    moved_to_trash: false,
+                    moved_size_kb: 0,
+                    moved_size_human: human_size_kb(0),
+                    error: Some(format!("La app ya no está disponible: {err}")),
+                });
+                continue;
+            }
+        };
+
+        if meta.file_type().is_symlink() || !meta.is_dir() || !is_app_bundle(&source) {
+            skipped_count += 1;
+            results.push(AppUninstallResultItem {
+                id: item.id,
+                name: item.name,
+                source_path: path_display,
+                destination_path: None,
+                moved_to_trash: false,
+                moved_size_kb: 0,
+                moved_size_human: human_size_kb(0),
+                error: Some("Omitida por no ser una app válida o por ser symlink.".to_string()),
+            });
+            continue;
+        }
+
+        let (removable, reason) = app_removal_status(app_name, &meta);
+        if !removable {
+            skipped_count += 1;
+            results.push(AppUninstallResultItem {
+                id: item.id,
+                name: item.name,
+                source_path: path_display,
+                destination_path: None,
+                moved_to_trash: false,
+                moved_size_kb: 0,
+                moved_size_human: human_size_kb(0),
+                error: Some(reason),
+            });
+            continue;
+        }
+
+        let destination = unique_trash_destination(app_name)?;
+        let destination_display = destination.display().to_string();
+        match fs::rename(&source, &destination) {
+            Ok(_) => {
+                moved_count += 1;
+                moved_total_kb += item.size_kb;
+                results.push(AppUninstallResultItem {
+                    id: item.id,
+                    name: item.name,
+                    source_path: path_display,
+                    destination_path: Some(destination_display),
+                    moved_to_trash: true,
+                    moved_size_kb: item.size_kb,
+                    moved_size_human: item.size_human,
+                    error: None,
+                });
+            }
+            Err(err) => {
+                skipped_count += 1;
+                results.push(AppUninstallResultItem {
+                    id: item.id,
+                    name: item.name,
+                    source_path: path_display,
+                    destination_path: None,
+                    moved_to_trash: false,
+                    moved_size_kb: 0,
+                    moved_size_human: human_size_kb(0),
+                    error: Some(format!(
+                        "No se pudo mover a la Papelera. macOS puede requerir permisos: {err}"
+                    )),
+                });
+            }
+        }
+    }
+
+    Ok(AppUninstallResponse {
+        ok: moved_count > 0,
+        mode: "move-to-trash".to_string(),
+        moved_count,
+        skipped_count,
+        moved_total_kb,
+        moved_total_human: human_size_kb(moved_total_kb),
+        items: results,
+    })
+}
+
+#[tauri::command]
 pub fn get_clean_history(limit: Option<u32>) -> Result<Vec<CleanHistoryEntry>, String> {
     #[cfg(feature = "native-clean")]
     {
@@ -1279,9 +1730,10 @@ pub fn apply_clean_history_retention(retention_days: u32) -> Result<PruneHistory
 #[cfg(test)]
 mod tests {
     use super::{
-        dry_run_cleaning, parse_threshold_to_bytes, scan_cleanable,
-        validate_and_normalize_categories,
+        app_id_for, dry_run_cleaning, is_app_bundle, parse_threshold_to_bytes, scan_cleanable,
+        validate_and_normalize_categories, validate_and_resolve_app_selection,
     };
+    use std::path::PathBuf;
 
     #[test]
     fn scan_cleanable_returns_expected_categories() {
@@ -1341,5 +1793,20 @@ mod tests {
         )
         .expect("validation should succeed");
         assert_eq!(result, vec!["tmp".to_string(), "user_logs".to_string()]);
+    }
+
+    #[test]
+    fn app_bundle_detection_requires_app_extension() {
+        assert!(is_app_bundle(&PathBuf::from("/Applications/Example.app")));
+        assert!(!is_app_bundle(&PathBuf::from("/Applications/Example")));
+        assert!(!is_app_bundle(&PathBuf::from("/Applications/Example.txt")));
+    }
+
+    #[test]
+    fn app_ids_do_not_expose_free_paths() {
+        assert_eq!(app_id_for("user", "Example.app"), "user:Example.app");
+        let err = validate_and_resolve_app_selection(vec!["/Applications/Example.app".to_string()])
+            .expect_err("free paths should not be accepted as app identifiers");
+        assert!(err.contains("Identificador de app no permitido"));
     }
 }
