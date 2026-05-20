@@ -1,12 +1,12 @@
-# Mac Cleaner Tauri Codex Pack
+# Mac Cleaner
 
-Repositorio base para evolucionar `mac_cleaner_v2.sh` hacia una aplicación instalable para macOS usando **Tauri + frontend web + motor Rust/Shell controlado**.
+Repositorio base, aplicación instalable para macOS usando **Tauri + frontend web + motor Rust/Shell**.
 
-La decisión arquitectónica oficial es **Tauri-first**. La PWA pura queda limitada a sitio complementario, documentación, marketing, cuenta de usuario o pricing. La limpieza real de macOS debe ejecutarse desde una app instalable con backend nativo.
+La decisión arquitectónica oficial es **Tauri-first**. PWA queda limitada a sitio complementario, documentación, marketing, cuenta de usuario o pricing. La limpieza real de macOS  se ejecuta desde una app instalable con backend nativo.
 
 ## Estructura
 
-```text
+```
 .
 ├── src/                         # Frontend React + TypeScript
 ├── src-tauri/                   # Backend Tauri/Rust
@@ -35,7 +35,7 @@ npm run tauri:dev
 
 ## Principio central
 
-El frontend nunca borra archivos. El frontend solicita acciones al backend Rust. Rust valida la acción, ejecuta solo comandos permitidos y, mientras la lógica no esté migrada completamente a Rust, invoca el script Shell seguro como motor transitorio.
+El frontend nunca borra archivos. El frontend solicita acciones al backend Rust. Rust valida la acción y ejecuta solo comandos permitidos.
 
 ## Migration Status
 
