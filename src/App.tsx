@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   Sparkles,
   TerminalSquare,
+  Trash2,
 } from "lucide-react";
 import {
   applyCleanHistoryRetention,
@@ -43,7 +44,7 @@ const PREFERENCES_KEY = "mac_cleaner_preferences_v2";
 
 const allCategories: Array<{ id: CleanCategory; label: string }> = [
   { id: "user_cache", label: "Caché antiguo" },
-  { id: "user_logs", label: "Registros antiguos" },
+  { id: "user_logs", label: "Actividad antigua" },
   { id: "trash", label: "Papelera" },
   { id: "tmp", label: "Temporales seguros" },
 ];
@@ -63,7 +64,7 @@ const riskMeta: Record<RiskLevel, { label: string; className: string; text: stri
   alto: { label: "Con cuidado", className: "risk-high", text: "Revisión especial" },
 };
 
-type AppView = "overview" | "files" | "history" | "settings";
+type AppView = "overview" | "files" | "history" | "settings" | "uninstall";
 type HistoryStatusFilter = "all" | "ok" | "partial" | "running" | "incomplete";
 type HistorySort = "date_desc" | "date_asc" | "reclaimed_desc" | "errors_desc";
 
@@ -115,7 +116,7 @@ function loadPreferences(): CleaningPreferences {
 
 function formatEpoch(epoch: number | null): string {
   if (!epoch) {
-    return "Ejecución incompleta";
+    return "Actividad incompleta";
   }
   return new Date(epoch * 1000).toLocaleString();
 }
@@ -301,13 +302,13 @@ export default function App() {
 
   function exportHistoryReport() {
     runAction(() => exportCleanHistoryReport(preferences.historyExportLimit), (data) => {
-      setOutput(`Reporte listo: ${data.report_path} (actividades incluidas: ${data.exported_runs})`);
+      setOutput(`Resumen listo: ${data.report_path} (actividades incluidas: ${data.exported_runs})`);
     });
   }
 
   function applyHistoryRetentionNow() {
     runAction(() => applyCleanHistoryRetention(preferences.historyRetentionDays), (data) => {
-      setOutput(`Actividad actualizada: ${data.removed_runs} registros antiguos eliminados, ${data.kept_runs} conservados.`);
+      setOutput(`Actividad actualizada: ${data.removed_runs} entradas antiguas eliminadas, ${data.kept_runs} conservadas.`);
       setHistoryLoaded(false);
     });
   }
@@ -336,15 +337,17 @@ export default function App() {
             <Gauge size={17} /> Inicio
           </a>
           <a className={`nav-item ${view === "files" ? "active" : ""}`} onClick={() => setView("files")}>
-            <Files size={17} /> Archivos
+            <Files size={17} /> Espacio
           </a>
           <a className={`nav-item ${view === "history" ? "active" : ""}`} onClick={() => setView("history")}>
-            <History size={17} /> Historial
+            <History size={17} /> Actividad
           </a>
           <a className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => setView("settings")}>
             <Settings size={17} /> Ajustes
           </a>
-          <a className="nav-item"><ShieldCheck size={17} /> Seguridad</a>
+          <a className={`nav-item ${view === "uninstall" ? "active" : ""}`} onClick={() => setView("uninstall")}>
+            <Trash2 size={17} /> Desinstalar
+          </a>
         </nav>
 
         <div className="engine-card">
@@ -357,42 +360,76 @@ export default function App() {
       </aside>
 
       <section className="content-area">
-        <motion.section
-          className="hero-panel"
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.45, ease: "easeOut" }}
-        >
-          <div className="hero-copy">
-            <p className="eyebrow"><Activity size={15} /> Cuidado premium para macOS</p>
-            <h1>Tu Mac, más ligero y en orden.</h1>
-            <p className="lead">
-              Revisa espacio recuperable, confirma con calma y libera solo lo que ya fue preparado de forma segura.
-            </p>
-            <div className="hero-actions">
-              <button className="primary-action" disabled={loading} onClick={() => runAction(scanCleanable, applyScanResult)}>
-                <Search size={18} /> Revisar mi Mac
-              </button>
-              <button className="secondary-action" disabled={loading || !scan} onClick={runDryRunForSelection}>
-                <TerminalSquare size={18} /> Revisar antes de limpiar
-              </button>
+        {view === "overview" && (
+          <>
+            <motion.section
+              className="hero-panel"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45, ease: "easeOut" }}
+            >
+              <div className="hero-copy">
+                <p className="eyebrow"><Activity size={15} /> Cuidado premium para macOS</p>
+                <h1>Tu Mac, más ligero y en orden.</h1>
+                <p className="lead">
+                  Revisa espacio recuperable, confirma con calma y libera solo lo que ya fue preparado de forma segura.
+                </p>
+                <div className="hero-actions">
+                  <button className="primary-action" disabled={loading} onClick={() => runAction(scanCleanable, applyScanResult)}>
+                    <Search size={18} /> Revisar mi Mac
+                  </button>
+                  <button className="secondary-action" disabled={loading || !scan} onClick={runDryRunForSelection}>
+                    <TerminalSquare size={18} /> Revisar antes de limpiar
+                  </button>
+                </div>
+              </div>
+
+              <div className="orbital-card">
+                <div className="orbital-ring" />
+                <span>Espacio recuperable</span>
+                <strong>{totalKb > 0 ? formatGb(totalKb) : "--"}</strong>
+                <small>{scan ? `${scan.items.length} áreas revisadas` : "Inicia una revisión para comenzar"}</small>
+              </div>
+            </motion.section>
+
+            <section className="metrics-grid">
+              <MetricCard icon={<HardDrive size={19} />} label="Espacio recuperable" value={totalKb > 0 ? formatGb(totalKb) : "0.00 GB"} note="Se libera solo después de revisar." />
+              <MetricCard icon={<CheckCircle2 size={19} />} label="Áreas listas" value={String(safeItems)} note="Zonas de menor riesgo para revisar." />
+              <MetricCard icon={<AlertTriangle size={19} />} label="Para mirar con calma" value={String(reviewItems)} note="Requieren una confirmación más consciente." />
+              <MetricCard icon={<Database size={19} />} label="Áreas elegidas" value={String(selectedCategories.length)} note={dryRun ? `${dryRun.candidates.length} elementos preparados.` : "Elige qué quieres revisar."} />
+            </section>
+          </>
+        )}
+
+        {view !== "overview" && (
+          <motion.section
+            className="view-header"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, ease: "easeOut" }}
+          >
+            <div>
+              <p className="eyebrow muted">
+                {view === "files" && "Espacio"}
+                {view === "history" && "Actividad"}
+                {view === "settings" && "Ajustes"}
+                {view === "uninstall" && "Desinstalar"}
+              </p>
+              <h1>
+                {view === "files" && "Encuentra lo que ocupa más."}
+                {view === "history" && "Tu actividad reciente."}
+                {view === "settings" && "Cuidado a tu medida."}
+                {view === "uninstall" && "Retira los datos de la app con calma."}
+              </h1>
             </div>
-          </div>
-
-          <div className="orbital-card">
-            <div className="orbital-ring" />
-            <span>Espacio recuperable</span>
-            <strong>{totalKb > 0 ? formatGb(totalKb) : "--"}</strong>
-            <small>{scan ? `${scan.items.length} áreas revisadas` : "Inicia una revisión para comenzar"}</small>
-          </div>
-        </motion.section>
-
-        <section className="metrics-grid">
-          <MetricCard icon={<HardDrive size={19} />} label="Espacio recuperable" value={totalKb > 0 ? formatGb(totalKb) : "0.00 GB"} note="Se libera solo después de revisar." />
-          <MetricCard icon={<CheckCircle2 size={19} />} label="Áreas listas" value={String(safeItems)} note="Zonas de menor riesgo para revisar." />
-          <MetricCard icon={<AlertTriangle size={19} />} label="Para mirar con calma" value={String(reviewItems)} note="Requieren una confirmación más consciente." />
-          <MetricCard icon={<Database size={19} />} label="Áreas elegidas" value={String(selectedCategories.length)} note={dryRun ? `${dryRun.candidates.length} elementos preparados.` : "Elige qué quieres revisar."} />
-        </section>
+            <span>
+              {view === "files" && "Solo revisión, sin borrar."}
+              {view === "history" && `${historyItems.length} actividades guardadas.`}
+              {view === "settings" && "Guardado en este Mac."}
+              {view === "uninstall" && "Sin tocar archivos personales."}
+            </span>
+          </motion.section>
+        )}
 
         <AnimatePresence>
           {error && (
@@ -461,7 +498,7 @@ export default function App() {
               <section className="glass-panel">
                 <div className="panel-heading">
                   <h2>Revisión antes de limpiar</h2>
-                  <span>{dryRun.candidates.length} elementos encontrados</span>
+                  <span>{dryRun.candidates.length} elementos listos para revisar</span>
                 </div>
                 <div className="dryrun-table">
                   {dryRun.candidates.slice(0, 80).map((candidate) => (
@@ -505,7 +542,7 @@ export default function App() {
                 <p className="eyebrow muted">Actividad</p>
                 <h2>Actividad reciente</h2>
               </div>
-              <span>{filteredHistoryItems.length} de {historyItems.length} registros</span>
+              <span>{filteredHistoryItems.length} de {historyItems.length} actividades</span>
             </section>
 
             <section className="glass-panel history-filters-panel">
@@ -526,7 +563,7 @@ export default function App() {
                 </label>
 
                 <label className="settings-field" htmlFor="historyCategoryFilter">
-                  <span>Categoría</span>
+                  <span>Área</span>
                   <select id="historyCategoryFilter" value={historyCategoryFilter} onChange={(event) => setHistoryCategoryFilter(event.target.value as "all" | CleanCategory)}>
                     <option value="all">Todas</option>
                     {allCategories.map((category) => (
@@ -561,7 +598,7 @@ export default function App() {
                   <History size={17} /> Actualizar actividad
                 </button>
                 <button disabled={loading} onClick={exportHistoryReport}>
-                  <Download size={17} /> Exportar reporte
+                  <Download size={17} /> Exportar resumen
                 </button>
                 <button disabled={loading} onClick={resetHistoryFilters}>
                   Restablecer filtros
@@ -590,9 +627,39 @@ export default function App() {
                 <div className="empty-state">
                   <History size={28} />
                   <h3>Sin actividad para estos filtros</h3>
-                  <p>Ajusta los filtros o realiza una revisión para ver nuevos registros.</p>
+                  <p>Ajusta los filtros o realiza una revisión para ver nueva actividad.</p>
                 </div>
               )}
+            </section>
+          </>
+        )}
+
+        {view === "uninstall" && (
+          <>
+            <section className="section-heading">
+              <div>
+                <p className="eyebrow muted">Datos de Mac Cleaner</p>
+                <h2>Desinstalación guiada</h2>
+              </div>
+              <span>Preparado para revisión segura</span>
+            </section>
+
+            <section className="uninstall-preview">
+              <article className="uninstall-panel">
+                <div className="metric-icon"><ShieldCheck size={19} /></div>
+                <h3>Primero revisaremos datos de la app</h3>
+                <p>Preferencias, actividad, resúmenes y caché propia se mostrarán por separado antes de eliminar algo.</p>
+              </article>
+              <article className="uninstall-panel">
+                <div className="metric-icon"><Trash2 size={19} /></div>
+                <h3>Tú decides qué conservar</h3>
+                <p>La limpieza de datos propios llegará en el siguiente paso con confirmación y registro de resultados.</p>
+              </article>
+              <article className="uninstall-panel">
+                <div className="metric-icon"><Files size={19} /></div>
+                <h3>Tus archivos no se tocarán</h3>
+                <p>La app solo podrá revisar ubicaciones propias de Mac Cleaner. Nada de otras apps ni documentos personales.</p>
+              </article>
             </section>
           </>
         )}
@@ -666,7 +733,7 @@ export default function App() {
                 </label>
 
                 <label className="settings-field" htmlFor="historyExportLimit">
-                  <span>Actividades incluidas en reportes</span>
+                  <span>Actividades incluidas en resúmenes</span>
                   <input
                     id="historyExportLimit"
                     type="number"
