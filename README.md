@@ -47,4 +47,6 @@ Para preparar una versión distribuible en macOS, consulta `docs/MACOS_SIGNING_N
 
 ## Licencia
 
-Este proyecto se distribuye bajo licencia **GNU AGPL-3.0**. Consulta `LICENSE` para más detalles.
+Copyright © 2026 Mac Cleaner. All rights reserved.
+
+El código fuente, binarios, interfaz, documentación y materiales relacionados son propietarios salvo acuerdo escrito en contrario. Consulta `LICENSE` para más detalles.
