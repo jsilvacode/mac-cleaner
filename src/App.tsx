@@ -409,11 +409,11 @@ export default function App() {
           <a className={`nav-item ${view === "history" ? "active" : ""}`} onClick={() => setView("history")}>
             <History size={17} /> Actividad
           </a>
-          <a className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => setView("settings")}>
-            <Settings size={17} /> Ajustes
-          </a>
           <a className={`nav-item ${view === "uninstall" ? "active" : ""}`} onClick={() => setView("uninstall")}>
             <Trash2 size={17} /> Desinstalar
+          </a>
+          <a className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => setView("settings")}>
+            <Settings size={17} /> Ajustes
           </a>
         </nav>
 
