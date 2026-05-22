@@ -1,65 +1,59 @@
 # macOS Signing and Notarization Checklist
 
-## 1) Apple prerequisites
+## 1) Apple Prerequisites
 
 - Active Apple Developer Program membership.
-- `Developer ID Application` certificate available in Keychain.
-- Team ID documented and accessible.
-- App bundle identifier fixed and unique.
+- Developer ID Application certificate available in Keychain.
+- Team ID documented and accessible to the release owner.
+- Production bundle identifier confirmed.
 
-## 2) Project readiness
+## 2) Release Readiness
 
-- `tauri.conf.json` identifier verified for production.
-- App name and version aligned across package metadata.
-- No debug-only permissions shipped in release artifacts.
+- App name and version aligned across project metadata.
 - Public release notes prepared.
+- Release validation summary completed.
+- No development-only credentials or secrets included in the repository.
 
-## 3) Build and sign
+## 3) Build And Sign
 
-- Build production app using `npm run tauri:build`.
-- Ensure artifacts are signed with Developer ID certificate.
-- Verify signature with `codesign --verify --deep --strict --verbose=2 <AppPath>`.
-- Inspect signing details with `codesign -dv --verbose=4 <AppPath>`.
+- Create the production macOS build.
+- Sign the app with the Developer ID certificate.
+- Verify the app signature.
+- Archive signing output for the release record.
 
-## 4) Notarization submission
+## 4) Notarization
 
-- Create App Store Connect API key or app-specific notarization credentials.
-- Submit artifact with `xcrun notarytool submit`.
-- Wait for notarization success status.
-- Keep notarization log output archived.
+- Submit the signed artifact to Apple notarization.
+- Wait for notarization success.
+- Archive notarization output for the release record.
 
-## 5) Stapling
+## 5) Stapling And Gatekeeper
 
-- Staple notarization ticket to app with `xcrun stapler staple <AppPath>`.
-- Validate staple with `xcrun stapler validate <AppPath>`.
-- Perform Gatekeeper assessment: `spctl --assess --type execute --verbose <AppPath>`.
+- Staple the notarization ticket to the app.
+- Validate the stapled artifact.
+- Run Gatekeeper assessment.
 
-## 6) Release verification
+## 6) Release Verification
 
-- Clean-machine install test on supported macOS version.
-- First-launch test without developer overrides.
-- Core actions smoke test:
-  - scan
-  - dry-run
-  - clean confirmation flow
-  - large files
-  - top dirs
-  - activity filters
-  - settings persistence
-  - safe app uninstall review flow
-  - dummy app uninstall to Trash
-- Capture release QA report.
-- Capture product screenshots for `Inicio`, `Actividad`, `Ajustes` and `Desinstalar`.
+- Install on a clean supported macOS environment.
+- Launch the app without developer overrides.
+- Review the core product flows:
+  - guided cleanup review
+  - space review
+  - activity history
+  - preferences
+  - guided app removal
+- Capture final release notes and validation summary.
 
-## 7) Operational safeguards
+## 7) Operational Safeguards
 
-- Keep signing credentials outside repository.
-- Rotate notarization secrets periodically.
-- Restrict CI secret access to protected branches.
-- Require release approval before production distribution.
+- Keep signing credentials outside the repository.
+- Restrict release credentials to approved maintainers.
+- Require explicit approval before public distribution.
+- Track certificate expiration dates.
 
-## 8) Post-release
+## 8) Post-Release
 
-- Publish checksum and artifact metadata.
-- Monitor user crash reports and execution logs.
-- Schedule periodic certificate expiration checks.
+- Publish artifact metadata and checksum.
+- Monitor support feedback and crash reports.
+- Schedule follow-up validation for the next release.

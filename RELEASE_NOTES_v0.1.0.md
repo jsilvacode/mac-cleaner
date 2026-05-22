@@ -1,80 +1,57 @@
-# Release Notes v0.1.0
+# Notas De Versión v0.1.0
 
-## Highlights
+## Resumen
 
-- Initial public release of a Tauri-first Mac Cleaner application.
-- Native Rust cleaning flow enabled by default with controlled shell fallback for parity.
-- Premium macOS-oriented React UI with guided cleaning, activity and uninstall flows.
-- Dry-run-first safety model before cleanup execution.
-- Large files and top directories inspection actions.
-- Local activity history, retention preferences and Markdown summary export.
-- Safe installed-app uninstall flow that moves selected apps to the user Trash.
+Mac Cleaner v0.1.0 presenta la primera experiencia completa del producto para cuidado y limpieza guiada en macOS.
 
-## What's Included
+Esta versión está enfocada en ayudar al usuario a decidir con confianza: revisar primero, confirmar con intención y evitar tocar archivos personales.
 
-### Core architecture
+## Destacados
 
-- React + TypeScript frontend.
-- Rust backend with auditable Tauri commands.
-- Native Rust scan, dry-run, clean, large-files and top-directories implementation.
-- Transitional shell engine (`scripts/mac_cleaner_v2.sh`) kept as a controlled fallback only.
-- Local JSONL activity log and report export.
+- Interfaz premium orientada a macOS y usuarios no técnicos.
+- Flujo de limpieza guiado con revisión previa.
+- Herramientas para revisar archivos y carpetas grandes.
+- Actividad local con filtros y resúmenes.
+- Preferencias para retención de actividad y tamaño de resúmenes.
+- Retiro guiado de apps mediante movimiento a la Papelera.
+- Navegación pulida: `Inicio`, `Espacio`, `Actividad`, `Desinstalar`, `Ajustes`.
 
-### Security model
+## Modelo De Seguridad
 
-- No `sudo` requirement in the initial version.
-- Explicit command allowlist and threshold validation.
-- Whitelisted cleanup paths only.
-- No arbitrary shell command execution from frontend.
-- Dry-run + explicit user confirmation before cleanup.
-- No free paths accepted from the UI for destructive operations.
-- App uninstall only scans `/Applications` and `~/Applications`.
-- App uninstall moves eligible `.app` bundles to `~/.Trash/Mac Cleaner Apps`.
-- Protected macOS apps, symlinks and recently modified apps are skipped.
-- App uninstall does not remove documents, preferences, containers or personal data.
+- Las acciones de limpieza requieren revisión previa.
+- Las acciones sensibles requieren confirmación explícita.
+- La app no solicita permisos elevados en esta versión.
+- El retiro de apps se limita a aplicaciones instaladas en ubicaciones esperadas de macOS.
+- Las apps elegibles se mueven a la Papelera en lugar de eliminarse permanentemente.
+- Documentos personales, contenedores de apps y archivos creados por el usuario no forman parte del retiro de apps.
 
-### Implemented commands
+## Incluido En Esta Versión
 
-- `scan_cleanable`
-- `dry_run_cleaning`
-- `run_cleaning`
-- `find_large_files` (allowed: `500M`, `1G`, `2G`, `5G`)
-- `get_top_dirs`
-- `get_clean_history`
-- `export_clean_history_report`
-- `apply_clean_history_retention`
-- `scan_installed_apps`
-- `prepare_app_uninstall`
-- `uninstall_apps_to_trash`
+- `Inicio`: vista general y punto de entrada guiado.
+- `Espacio`: revisión de archivos y carpetas grandes.
+- `Actividad`: historial local con filtros y resúmenes.
+- `Desinstalar`: retiro guiado de apps con flujo reversible desde la Papelera.
+- `Ajustes`: preferencias de áreas, actividad y resúmenes.
 
-## Product Experience
+## Validación
 
-- Premium navigation: `Inicio`, `Espacio`, `Actividad`, `Desinstalar`, `Ajustes`.
-- User-friendly Spanish microcopy for non-technical Mac owners.
-- Activity filters by status, date range, area and sort order.
-- Advanced preferences for activity retention and export size.
-- Guided uninstall section with review-first and reversible-to-Trash language.
+Esta versión candidata fue validada con:
 
-## Developer Experience
+- Verificación de generación de versión.
+- Comprobaciones automatizadas de seguridad.
+- Prueba de arranque en macOS.
+- Prueba de retiro seguro con una app de validación.
+- Revisión visual de las secciones principales del producto.
 
-- GitHub Actions CI configured for:
-  - TypeScript/Vite build validation.
-  - Rust `cargo check` validation in `src-tauri`.
-- Local QA commands used for this milestone:
-  - `npm run build`
-  - `cargo test`
-  - `cargo test smoke_uninstall_dummy_app_moves_to_temp_trash -- --ignored --test-threads=1`
+## Limitaciones Conocidas
 
-## Known limitations
+- La distribución pública requiere firmado con Developer ID y notarización de Apple.
+- El retiro de apps se enfoca actualmente en mover el paquete principal de la app a la Papelera.
+- La revisión opcional de archivos residuales posteriores al retiro queda planificada para una versión futura.
 
-- Signing and notarization pipeline is not automated yet.
-- Native app uninstall currently removes the `.app` bundle only by moving it to Trash.
-- App uninstall does not yet offer optional cleanup of app support files, preferences or containers.
-- macOS signed build and clean-machine install test are still required before public distribution.
+## Próximo Enfoque
 
-## Next milestone focus
-
-- Add release automation and signed macOS build pipeline.
-- Run notarized macOS distribution QA on a clean machine.
-- Add optional post-uninstall leftover scan with explicit per-location review.
-- Prepare marketing screenshots, pricing page and onboarding copy.
+- Flujo de firmado y notarización para macOS.
+- Validación de instalación en un entorno limpio.
+- Onboarding inicial y capturas comerciales del producto.
+- Revisión opcional de archivos residuales después de retirar una app.
