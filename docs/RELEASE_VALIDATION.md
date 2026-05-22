@@ -4,31 +4,33 @@ Fecha: 2026-05-21
 
 ## Alcance
 
-Esta validación cubre la versión candidata v0.1.0 de Mac Cleaner, incluyendo revisión de limpieza, actividad, preferencias y retiro guiado de apps.
+Esta validación cubre la versión candidata v0.1.0 de Mac Cleaner, enfocada en limpieza profunda, desinstalación de apps, detección de espacio ocupado y ajustes de seguridad.
 
 ## Áreas Validadas
 
-- Generación de versión completada correctamente.
+- Build de versión completado correctamente.
 - Comprobaciones automatizadas completadas correctamente.
 - Arranque de la app en macOS completado correctamente.
-- Retiro guiado de apps validado con una app de validación.
-- Secciones principales del producto revisadas visualmente.
+- Limpieza de cachés, temporales, logs y Papelera validada con confirmación.
+- Desinstalación de apps validada con una app de prueba.
+- Secciones principales revisadas visualmente.
 - Notas de versión y checklist de distribución actualizados.
 
 ## Secciones Revisadas
 
 - `Inicio`
-- `Espacio`
-- `Actividad`
+- `Limpiar`
 - `Desinstalar`
+- `Espacio`
 - `Ajustes`
 
 ## Resultados
 
-- Generación de versión: aprobada.
+- Build de versión: aprobado.
 - Comprobaciones automatizadas: aprobadas.
 - Arranque en macOS: aprobado.
-- Prueba de retiro de app: aprobada.
+- Prueba de limpieza: aprobada.
+- Prueba de desinstalación: aprobada.
 - Revisión visual del producto: aprobada.
 
 ## Preparación Para Distribución

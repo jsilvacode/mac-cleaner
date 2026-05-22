@@ -2,56 +2,56 @@
 
 ## Resumen
 
-Mac Cleaner v0.1.0 presenta la primera experiencia completa del producto para cuidado y limpieza guiada en macOS.
+Mac Cleaner v0.1.0 presenta la primera experiencia funcional de limpieza profunda para macOS.
 
-Esta versión está enfocada en ayudar al usuario a decidir con confianza: revisar primero, confirmar con intención y evitar tocar archivos personales.
+Esta versión se enfoca en limpiar basura técnica real: cachés, temporales, logs antiguos, Papelera y residuos asociados a aplicaciones, manteniendo confirmaciones claras cuando una acción pueda afectar configuraciones o archivos personales.
 
 ## Destacados
 
-- Interfaz clara orientada a macOS y usuarios no técnicos.
-- Flujo de limpieza guiado con revisión previa.
-- Herramientas para revisar archivos y carpetas grandes.
-- Actividad local con filtros y resúmenes.
-- Preferencias para retención de actividad y tamaño de resúmenes.
-- Retiro guiado de apps mediante movimiento a la Papelera.
-- Navegación pulida: `Inicio`, `Espacio`, `Actividad`, `Desinstalar`, `Ajustes`.
+- Limpieza activa de cachés, temporales, logs antiguos y Papelera.
+- Desinstalación de aplicaciones con rastros asociados cuando existen reglas seguras.
+- Detección de archivos grandes y carpetas pesadas como apoyo para recuperar espacio.
+- Resultado inmediato después de limpiar.
+- Ajustes para categorías de limpieza, tamaño mínimo de archivos grandes y conservación de resultados.
+- Navegación actualizada: `Inicio`, `Limpiar`, `Desinstalar`, `Espacio`, `Ajustes`.
 
 ## Modelo De Seguridad
 
-- Las acciones de limpieza requieren revisión previa.
+- La app limpia basura técnica con confirmación.
 - Las acciones sensibles requieren confirmación explícita.
 - La app no solicita permisos elevados en esta versión.
-- El retiro de apps se limita a aplicaciones instaladas en ubicaciones esperadas de macOS.
-- Las apps elegibles se mueven a la Papelera en lugar de eliminarse permanentemente.
-- Documentos personales, contenedores de apps y archivos creados por el usuario no forman parte del retiro de apps.
+- La desinstalación se limita a apps y rastros asociados desde ubicaciones permitidas.
+- Los elementos elegibles se mueven a la Papelera en lugar de eliminarse permanentemente.
+- Documentos personales y rutas libres quedan fuera de las acciones automáticas.
 
 ## Incluido En Esta Versión
 
-- `Inicio`: vista general y punto de entrada guiado.
-- `Espacio`: revisión de archivos y carpetas grandes.
-- `Actividad`: historial local con filtros y resúmenes.
-- `Desinstalar`: retiro guiado de apps con flujo reversible desde la Papelera.
-- `Ajustes`: preferencias de áreas, actividad y resúmenes.
+- `Inicio`: estado general, basura detectada y acceso rápido.
+- `Limpiar`: escaneo y limpieza de categorías permitidas.
+- `Desinstalar`: apps instaladas y archivos residuales asociados.
+- `Espacio`: archivos grandes y carpetas pesadas.
+- `Ajustes`: comportamiento de limpieza, resultados guardados y preferencias.
 
 ## Validación
 
 Esta versión candidata fue validada con:
 
-- Verificación de generación de versión.
+- Build de versión.
 - Comprobaciones automatizadas de seguridad.
 - Prueba de arranque en macOS.
-- Prueba de retiro seguro con una app de validación.
+- Prueba de limpieza.
+- Prueba de desinstalación con una app de validación.
 - Revisión visual de las secciones principales del producto.
 
 ## Limitaciones Conocidas
 
 - La distribución pública requiere firmado con Developer ID y notarización de Apple.
-- El retiro de apps se enfoca actualmente en mover el paquete principal de la app a la Papelera.
-- La revisión opcional de archivos residuales posteriores al retiro queda planificada para una versión futura.
+- Las métricas reales de RAM, CPU y disco quedan planificadas para un siguiente sprint.
+- Categorías avanzadas como navegadores, herramientas de desarrollo y residuos huérfanos requieren reglas específicas antes de activarse.
 
 ## Próximo Enfoque
 
-- Flujo de firmado y notarización para macOS.
-- Validación de instalación en un entorno limpio.
-- Onboarding inicial y capturas comerciales del producto.
-- Revisión opcional de archivos residuales después de retirar una app.
+- Indicadores reales de estado del Mac: disco, RAM y CPU.
+- Limpieza de datos temporales de navegadores con reglas específicas.
+- Basura técnica de herramientas de desarrollo.
+- Firma, notarización y prueba de instalación en entorno limpio.

@@ -1,22 +1,18 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  Activity,
   AlertTriangle,
   CheckCircle2,
   ChevronRight,
   Database,
-  Download,
   Files,
   Gauge,
   HardDrive,
-  History,
   Play,
   Search,
   Settings,
   ShieldCheck,
   Sparkles,
-  TerminalSquare,
   Trash2,
 } from "lucide-react";
 import {
@@ -24,7 +20,6 @@ import {
   dryRunCleaning,
   exportCleanHistoryReport,
   findLargeFiles,
-  getCleanHistory,
   getTopDirs,
   prepareAppUninstall,
   runCleaning,
@@ -35,7 +30,6 @@ import {
 import type {
   AppUninstallPlanResponse,
   CleanCategory,
-  CleanHistoryEntry,
   CleaningPreferences,
   DryRunResponse,
   InstalledAppItem,
@@ -49,7 +43,7 @@ const PREFERENCES_KEY = "mac_cleaner_preferences_v2";
 
 const allCategories: Array<{ id: CleanCategory; label: string }> = [
   { id: "user_cache", label: "Caché de apps" },
-  { id: "user_logs", label: "Registros antiguos" },
+  { id: "user_logs", label: "Logs antiguos" },
   { id: "trash", label: "Papelera" },
   { id: "tmp", label: "Temporales" },
 ];
@@ -64,28 +58,18 @@ const defaultPreferences: CleaningPreferences = {
 };
 
 const riskMeta: Record<RiskLevel, { label: string; className: string; text: string }> = {
-  bajo: { label: "Bajo riesgo", className: "risk-low", text: "Listo para limpiar tras revisar" },
-  medio: { label: "Revisión", className: "risk-medium", text: "Confirma antes de liberar" },
-  alto: { label: "Cuidado", className: "risk-high", text: "Revisión especial" },
+  bajo: { label: "Bajo riesgo", className: "risk-low", text: "Listo para limpiar" },
+  medio: { label: "Confirmar", className: "risk-medium", text: "Se limpia tras confirmar" },
+  alto: { label: "Avanzado", className: "risk-high", text: "Requiere control manual" },
 };
 
-type AppView = "overview" | "files" | "history" | "settings" | "uninstall";
-type HistoryStatusFilter = "all" | "ok" | "partial" | "running" | "incomplete";
-type HistorySort = "date_desc" | "date_asc" | "reclaimed_desc" | "errors_desc";
+type AppView = "overview" | "clean" | "uninstall" | "files" | "settings";
 
 function clampNumber(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) {
     return min;
   }
   return Math.min(max, Math.max(min, Math.trunc(value)));
-}
-
-function epochToLocalDateKey(epochSecs: number): string {
-  const date = new Date(epochSecs * 1000);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
 }
 
 function loadPreferences(): CleaningPreferences {
@@ -105,45 +89,19 @@ function loadPreferences(): CleaningPreferences {
       )
       : defaultPreferences.defaultCategories;
 
-    const historyRetentionDays = clampNumber(parsed.historyRetentionDays ?? defaultPreferences.historyRetentionDays, 1, 3650);
-    const historyExportLimit = clampNumber(parsed.historyExportLimit ?? defaultPreferences.historyExportLimit, 5, 200);
-
     return {
       defaultCategories: defaultCategories.length > 0 ? defaultCategories : defaultPreferences.defaultCategories,
       largeFilesThreshold,
-      historyRetentionDays,
-      historyExportLimit,
+      historyRetentionDays: clampNumber(parsed.historyRetentionDays ?? defaultPreferences.historyRetentionDays, 1, 3650),
+      historyExportLimit: clampNumber(parsed.historyExportLimit ?? defaultPreferences.historyExportLimit, 5, 200),
     };
   } catch {
     return defaultPreferences;
   }
 }
 
-function formatEpoch(epoch: number | null): string {
-  if (!epoch) {
-    return "Actividad incompleta";
-  }
-  return new Date(epoch * 1000).toLocaleString();
-}
-
 function getCategoryLabel(category: string): string {
   return allCategories.find((item) => item.id === category)?.label ?? category;
-}
-
-function getHistoryStatusLabel(status: string): string {
-  if (status === "ok") {
-    return "Completado";
-  }
-  if (status === "partial") {
-    return "Con avisos";
-  }
-  if (status === "running") {
-    return "En curso";
-  }
-  if (status === "incomplete") {
-    return "Incompleto";
-  }
-  return status;
 }
 
 export default function App() {
@@ -151,13 +109,6 @@ export default function App() {
   const [scan, setScan] = useState<ScanResponse | null>(null);
   const [dryRun, setDryRun] = useState<DryRunResponse | null>(null);
   const [selectedCategories, setSelectedCategories] = useState<CleanCategory[]>([]);
-  const [historyItems, setHistoryItems] = useState<CleanHistoryEntry[]>([]);
-  const [historyLoaded, setHistoryLoaded] = useState(false);
-  const [historyStatusFilter, setHistoryStatusFilter] = useState<HistoryStatusFilter>("all");
-  const [historyCategoryFilter, setHistoryCategoryFilter] = useState<"all" | CleanCategory>("all");
-  const [historyFromDate, setHistoryFromDate] = useState<string>("");
-  const [historyToDate, setHistoryToDate] = useState<string>("");
-  const [historySort, setHistorySort] = useState<HistorySort>("date_desc");
   const [installedApps, setInstalledApps] = useState<InstalledAppItem[]>([]);
   const [appsLoaded, setAppsLoaded] = useState(false);
   const [selectedAppIds, setSelectedAppIds] = useState<string[]>([]);
@@ -176,12 +127,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (view === "history" && !historyLoaded) {
-      void loadHistory();
-    }
-  }, [view, historyLoaded]);
-
-  useEffect(() => {
     if (view === "uninstall" && !appsLoaded) {
       void loadInstalledApps();
     }
@@ -189,51 +134,9 @@ export default function App() {
 
   const totalKb = useMemo(() => scan?.items.reduce((sum, item) => sum + item.estimated_kb, 0) ?? 0, [scan]);
   const safeItems = scan?.items.filter((item) => item.risk === "bajo").length ?? 0;
-  const reviewItems = scan?.items.filter((item) => item.risk !== "bajo").length ?? 0;
+  const confirmItems = scan?.items.filter((item) => item.risk !== "bajo").length ?? 0;
   const removableApps = useMemo(() => installedApps.filter((app) => app.removable), [installedApps]);
-
-  const filteredHistoryItems = useMemo(() => {
-    const byDateRange = historyItems.filter((entry) => {
-      const dateKey = epochToLocalDateKey(entry.started_at_epoch_secs);
-      if (historyFromDate && dateKey < historyFromDate) {
-        return false;
-      }
-      if (historyToDate && dateKey > historyToDate) {
-        return false;
-      }
-      return true;
-    });
-
-    const byStatus = byDateRange.filter((entry) => {
-      if (historyStatusFilter === "all") {
-        return true;
-      }
-      return entry.status === historyStatusFilter;
-    });
-
-    const byCategory = byStatus.filter((entry) => {
-      if (historyCategoryFilter === "all") {
-        return true;
-      }
-      return entry.selected_categories.includes(historyCategoryFilter);
-    });
-
-    const sorted = [...byCategory];
-    sorted.sort((a, b) => {
-      if (historySort === "date_asc") {
-        return a.started_at_epoch_secs - b.started_at_epoch_secs;
-      }
-      if (historySort === "reclaimed_desc") {
-        return b.reclaimed_total_kb - a.reclaimed_total_kb;
-      }
-      if (historySort === "errors_desc") {
-        return b.error_count - a.error_count;
-      }
-      return b.started_at_epoch_secs - a.started_at_epoch_secs;
-    });
-
-    return sorted;
-  }, [historyItems, historyStatusFilter, historyCategoryFilter, historyFromDate, historyToDate, historySort]);
+  const preparedTrashCount = dryRun?.candidates.length ?? 0;
 
   async function runAction<T>(action: () => Promise<T>, onSuccess: (data: T) => void) {
     setLoading(true);
@@ -248,13 +151,6 @@ export default function App() {
     }
   }
 
-  async function loadHistory() {
-    await runAction(() => getCleanHistory(200), (data) => {
-      setHistoryItems(data);
-      setHistoryLoaded(true);
-    });
-  }
-
   async function loadInstalledApps() {
     await runAction(scanInstalledApps, (data) => {
       setInstalledApps(data.items);
@@ -264,11 +160,19 @@ export default function App() {
     });
   }
 
+  function applyScanResult(data: ScanResponse) {
+    setScan(data);
+    setDryRun(null);
+    setOutput("");
+    const available = data.items.map((item) => item.id);
+    const preferred = available.filter((category) => preferences.defaultCategories.includes(category));
+    setSelectedCategories(preferred.length > 0 ? preferred : available);
+  }
+
   function toggleCategory(category: CleanCategory) {
-    setSelectedCategories((current) => {
-      const next = current.includes(category) ? current.filter((item) => item !== category) : [...current, category];
-      return next;
-    });
+    setSelectedCategories((current) => current.includes(category)
+      ? current.filter((item) => item !== category)
+      : [...current, category]);
     setDryRun(null);
   }
 
@@ -276,17 +180,15 @@ export default function App() {
     if (!app.removable) {
       return;
     }
-    setSelectedAppIds((current) => {
-      const next = current.includes(app.id) ? current.filter((id) => id !== app.id) : [...current, app.id];
-      return next;
-    });
+    setSelectedAppIds((current) => current.includes(app.id)
+      ? current.filter((id) => id !== app.id)
+      : [...current, app.id]);
     setAppUninstallPlan(null);
   }
 
   function toggleDefaultCategory(category: CleanCategory) {
     setPreferences((current) => {
-      const isSelected = current.defaultCategories.includes(category);
-      const next = isSelected
+      const next = current.defaultCategories.includes(category)
         ? current.defaultCategories.filter((item) => item !== category)
         : [...current.defaultCategories, category];
       return {
@@ -306,64 +208,48 @@ export default function App() {
     setDryRun(null);
   }
 
-  function applyScanResult(data: ScanResponse) {
-    setScan(data);
-    setDryRun(null);
-    setOutput("");
-    const available = data.items.map((item) => item.id);
-    const preferred = available.filter((category) => preferences.defaultCategories.includes(category));
-    setSelectedCategories(preferred.length > 0 ? preferred : available);
-  }
-
   function runDryRunForSelection() {
     if (selectedCategories.length === 0) {
-      setError("Elige al menos un área para revisar antes de liberar espacio.");
+      setError("Elige al menos una categoría para preparar la limpieza.");
       return;
     }
     runAction(() => dryRunCleaning(selectedCategories), setDryRun);
+    setView("clean");
   }
 
   function runNativeCleaning() {
     if (selectedCategories.length === 0) {
-      setError("Elige al menos un área antes de liberar espacio.");
+      setError("Elige al menos una categoría antes de limpiar.");
       return;
     }
 
-    const ok = window.confirm("Mac Cleaner eliminará los elementos revisados en caché, logs, temporales y Papelera. Nada fuera de esta selección será tocado. ¿Continuar?");
+    const ok = window.confirm("Mac Cleaner eliminará la basura preparada en cachés, logs, temporales y Papelera. Nada fuera de esta selección será tocado. ¿Continuar?");
     if (!ok) {
       return;
     }
 
     runAction(() => runCleaning(selectedCategories), (data) => {
       setOutput(data.stdout || data.stderr);
-      setHistoryLoaded(false);
+      setDryRun(null);
+      void runAction(scanCleanable, applyScanResult);
     });
   }
 
-  function exportHistoryReport() {
+  function exportResultsReport() {
     runAction(() => exportCleanHistoryReport(preferences.historyExportLimit), (data) => {
-      setOutput(`Resumen listo: ${data.report_path} (actividades incluidas: ${data.exported_runs})`);
+      setOutput(`Resultado exportado: ${data.report_path} (resultados incluidos: ${data.exported_runs})`);
     });
   }
 
-  function applyHistoryRetentionNow() {
+  function applyResultsRetentionNow() {
     runAction(() => applyCleanHistoryRetention(preferences.historyRetentionDays), (data) => {
-      setOutput(`Actividad actualizada: ${data.removed_runs} entradas antiguas eliminadas, ${data.kept_runs} conservadas.`);
-      setHistoryLoaded(false);
+      setOutput(`Resultados actualizados: ${data.removed_runs} antiguos eliminados, ${data.kept_runs} conservados.`);
     });
-  }
-
-  function resetHistoryFilters() {
-    setHistoryStatusFilter("all");
-    setHistoryCategoryFilter("all");
-    setHistoryFromDate("");
-    setHistoryToDate("");
-    setHistorySort("date_desc");
   }
 
   function prepareSelectedAppsForUninstall() {
     if (selectedAppIds.length === 0) {
-      setError("Elige al menos una app para preparar el retiro.");
+      setError("Elige al menos una app para preparar la desinstalación.");
       return;
     }
     runAction(() => prepareAppUninstall(selectedAppIds), setAppUninstallPlan);
@@ -371,14 +257,14 @@ export default function App() {
 
   function runAppUninstall() {
     if (!appUninstallPlan || appUninstallPlan.items.length === 0) {
-      setError("Primero revisa las apps antes de retirarlas.");
+      setError("Primero prepara la desinstalación de las apps seleccionadas.");
       return;
     }
 
     const appNames = appUninstallPlan.items.map((item) => item.name).join(", ");
     const leftoverCount = appUninstallPlan.leftovers.length;
     const ok = window.confirm(
-      `Mac Cleaner moverá a la Papelera: ${appNames}${leftoverCount > 0 ? ` y ${leftoverCount} rastros asociados` : ""}. Revisa que no necesites esos datos antes de continuar. ¿Continuar?`,
+      `Mac Cleaner moverá a la Papelera: ${appNames}${leftoverCount > 0 ? ` y ${leftoverCount} rastros residuales` : ""}. Revisa que no necesites esos datos antes de continuar. ¿Continuar?`,
     );
     if (!ok) {
       return;
@@ -400,7 +286,7 @@ export default function App() {
           <div className="brand-mark"><Sparkles size={19} /></div>
           <div>
             <strong>Mac Cleaner</strong>
-            <span>Limpieza local para Mac</span>
+            <span>Limpieza profunda para Mac</span>
           </div>
         </div>
 
@@ -408,14 +294,14 @@ export default function App() {
           <a className={`nav-item ${view === "overview" ? "active" : ""}`} onClick={() => setView("overview")}>
             <Gauge size={17} /> Inicio
           </a>
-          <a className={`nav-item ${view === "files" ? "active" : ""}`} onClick={() => setView("files")}>
-            <Files size={17} /> Espacio
-          </a>
-          <a className={`nav-item ${view === "history" ? "active" : ""}`} onClick={() => setView("history")}>
-            <History size={17} /> Actividad
+          <a className={`nav-item ${view === "clean" ? "active" : ""}`} onClick={() => setView("clean")}>
+            <Trash2 size={17} /> Limpiar
           </a>
           <a className={`nav-item ${view === "uninstall" ? "active" : ""}`} onClick={() => setView("uninstall")}>
             <Trash2 size={17} /> Desinstalar
+          </a>
+          <a className={`nav-item ${view === "files" ? "active" : ""}`} onClick={() => setView("files")}>
+            <Files size={17} /> Espacio
           </a>
           <a className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => setView("settings")}>
             <Settings size={17} /> Ajustes
@@ -425,8 +311,8 @@ export default function App() {
         <div className="engine-card">
           <span className="status-dot" />
           <div>
-            <strong>Motor local activo</strong>
-            <p>Escanea, revisa y limpia en este Mac.</p>
+            <strong>Listo para limpiar</strong>
+            <p>Escanea basura técnica y recupera espacio.</p>
           </div>
         </div>
       </aside>
@@ -441,34 +327,34 @@ export default function App() {
               transition={{ duration: 0.45, ease: "easeOut" }}
             >
               <div className="hero-copy">
-                <p className="eyebrow"><Activity size={15} /> Cuidado premium para macOS</p>
-                <h1>Libera caché, temporales y Papelera.</h1>
+                <p className="eyebrow"><Sparkles size={15} /> Limpieza profunda para macOS</p>
+                <h1>Limpia basura técnica y recupera espacio.</h1>
                 <p className="lead">
-                  Encuentra archivos recuperables, revisa exactamente qué se borrará y ejecuta una limpieza local efectiva.
+                  Escanea cachés, temporales, logs y Papelera. Limpia lo que sobra y conserva el control cuando algo pueda afectar tus datos.
                 </p>
                 <div className="hero-actions">
                   <button className="primary-action" disabled={loading} onClick={() => runAction(scanCleanable, applyScanResult)}>
-                    <Search size={18} /> Buscar espacio
+                    <Search size={18} /> Escanear basura
                   </button>
                   <button className="secondary-action" disabled={loading || !scan} onClick={runDryRunForSelection}>
-                    <TerminalSquare size={18} /> Ver lo que se borrará
+                    <Trash2 size={18} /> Preparar limpieza
                   </button>
                 </div>
               </div>
 
               <div className="orbital-card">
                 <div className="orbital-ring" />
-                <span>Espacio recuperable</span>
+                <span>Basura detectada</span>
                 <strong>{totalKb > 0 ? formatGb(totalKb) : "--"}</strong>
-                <small>{scan ? `${scan.items.length} áreas revisadas` : "Escaneando este Mac"}</small>
+                <small>{scan ? `${scan.items.length} categorías detectadas` : "Escaneando este Mac"}</small>
               </div>
             </motion.section>
 
             <section className="metrics-grid">
-              <MetricCard icon={<HardDrive size={19} />} label="Espacio recuperable" value={totalKb > 0 ? formatGb(totalKb) : "0.00 GB"} note="Caché, temporales, logs y Papelera." />
-              <MetricCard icon={<CheckCircle2 size={19} />} label="Bajo riesgo" value={String(safeItems)} note="Áreas listas para revisión rápida." />
-              <MetricCard icon={<AlertTriangle size={19} />} label="Requieren confirmación" value={String(reviewItems)} note="Se limpian solo si las apruebas." />
-              <MetricCard icon={<Database size={19} />} label="Áreas elegidas" value={String(selectedCategories.length)} note={dryRun ? `${dryRun.candidates.length} elementos preparados.` : "Selecciona qué limpiar."} />
+              <MetricCard icon={<HardDrive size={19} />} label="Basura detectada" value={totalKb > 0 ? formatGb(totalKb) : "0.00 GB"} note="Cachés, temporales, logs y Papelera." />
+              <MetricCard icon={<CheckCircle2 size={19} />} label="Bajo riesgo" value={String(safeItems)} note="Categorías listas para limpiar." />
+              <MetricCard icon={<AlertTriangle size={19} />} label="Con confirmación" value={String(confirmItems)} note="Se limpian después de confirmar." />
+              <MetricCard icon={<Database size={19} />} label="Preparados" value={String(preparedTrashCount)} note={dryRun ? "Archivos basura listos." : "Prepara la limpieza."} />
             </section>
           </>
         )}
@@ -482,23 +368,23 @@ export default function App() {
           >
             <div>
               <p className="eyebrow muted">
-                {view === "files" && "Espacio"}
-                {view === "history" && "Actividad"}
-                {view === "settings" && "Ajustes"}
+                {view === "clean" && "Limpiar"}
                 {view === "uninstall" && "Desinstalar"}
+                {view === "files" && "Espacio"}
+                {view === "settings" && "Ajustes"}
               </p>
               <h1>
-                {view === "files" && "Encuentra lo que ocupa más."}
-                {view === "history" && "Tu actividad reciente."}
-                {view === "settings" && "Cuidado a tu medida."}
-                {view === "uninstall" && "Desinstala apps instaladas."}
+                {view === "clean" && "Escanea y limpia basura técnica."}
+                {view === "uninstall" && "Desinstala apps y elimina residuos."}
+                {view === "files" && "Detecta lo que ocupa más."}
+                {view === "settings" && "Configura la limpieza."}
               </h1>
             </div>
             <span>
-              {view === "files" && "Solo revisión, sin borrar."}
-              {view === "history" && `${historyItems.length} actividades guardadas.`}
+              {view === "clean" && "Cachés, logs, temporales y Papelera."}
+              {view === "uninstall" && "Apps y rastros residuales a la Papelera."}
+              {view === "files" && "Archivos grandes y carpetas pesadas."}
               {view === "settings" && "Guardado en este Mac."}
-              {view === "uninstall" && "A la Papelera, con revisión previa."}
             </span>
           </motion.section>
         )}
@@ -511,18 +397,24 @@ export default function App() {
           )}
         </AnimatePresence>
 
-        {view === "overview" && (
+        {view === "clean" && (
           <>
             <section className="command-strip">
+              <button disabled={loading} onClick={() => runAction(scanCleanable, applyScanResult)}>
+                <Search size={17} /> Escanear basura
+              </button>
+              <button disabled={loading || !scan} onClick={runDryRunForSelection}>
+                <ShieldCheck size={17} /> Preparar limpieza
+              </button>
               <button disabled={loading || !dryRun} className="danger-action" onClick={runNativeCleaning}>
-                <Play size={17} /> Liberar espacio {selectedCategories.length > 0 ? `(${selectedCategories.length})` : ""}
+                <Play size={17} /> Limpiar ahora {selectedCategories.length > 0 ? `(${selectedCategories.length})` : ""}
               </button>
             </section>
 
             <section className="section-heading">
               <div>
-                <p className="eyebrow muted">Áreas revisadas</p>
-                <h2>Recomendaciones</h2>
+                <p className="eyebrow muted">Basura técnica</p>
+                <h2>Categorías para limpiar</h2>
               </div>
               <span>{scan ? "Listo para limpiar" : "Escaneo pendiente"}</span>
             </section>
@@ -550,7 +442,7 @@ export default function App() {
                       <strong>{item.estimated_human}</strong>
                       <p className="mono-path">{item.path}</p>
                       <small>
-                        {meta.text} · elementos de más de {item.age_days} días · {selectedCategories.includes(item.id) ? "incluida" : "omitida"}
+                        {meta.text} · más de {item.age_days} días · {selectedCategories.includes(item.id) ? "incluida" : "omitida"}
                       </small>
                     </motion.article>
                   );
@@ -560,8 +452,8 @@ export default function App() {
               {!scan && (
                 <div className="empty-state">
                   <Sparkles size={28} />
-                  <h3>Revisión pendiente</h3>
-                  <p>Busca espacio recuperable para preparar una limpieza real de caché, temporales y Papelera.</p>
+                  <h3>Escaneo pendiente</h3>
+                  <p>Escanea cachés, temporales, logs y Papelera para preparar una limpieza real.</p>
                 </div>
               )}
             </section>
@@ -569,8 +461,8 @@ export default function App() {
             {dryRun && (
               <section className="glass-panel">
                 <div className="panel-heading">
-                  <h2>Elementos que se borrarán</h2>
-                  <span>{dryRun.candidates.length} elementos preparados</span>
+                  <h2>Archivos basura preparados</h2>
+                  <span>{dryRun.candidates.length} elementos listos</span>
                 </div>
                 <div className="dryrun-table">
                   {dryRun.candidates.slice(0, 80).map((candidate) => (
@@ -586,151 +478,31 @@ export default function App() {
           </>
         )}
 
-        {view === "files" && (
-          <>
-            <section className="section-heading">
-              <div>
-                <p className="eyebrow muted">Análisis</p>
-                <h2>Archivos y carpetas</h2>
-              </div>
-              <span>Solo revisión</span>
-            </section>
-
-            <section className="command-strip">
-              <button disabled={loading} onClick={() => runAction(() => findLargeFiles(preferences.largeFilesThreshold), (data) => setOutput(data.stdout))}>
-                Archivos grandes ({preferences.largeFilesThreshold}+)
-              </button>
-              <button disabled={loading} onClick={() => runAction(getTopDirs, (data) => setOutput(data.stdout))}>
-                Carpetas que ocupan más
-              </button>
-            </section>
-          </>
-        )}
-
-        {view === "history" && (
-          <>
-            <section className="section-heading">
-              <div>
-                <p className="eyebrow muted">Actividad</p>
-                <h2>Actividad reciente</h2>
-              </div>
-              <span>{filteredHistoryItems.length} de {historyItems.length} actividades</span>
-            </section>
-
-            <section className="glass-panel history-filters-panel">
-              <div className="panel-heading">
-                <h2>Filtros</h2>
-                <span>Orden y rango</span>
-              </div>
-              <div className="history-filters-grid">
-                <label className="settings-field" htmlFor="historyStatusFilter">
-                  <span>Estado</span>
-                  <select id="historyStatusFilter" value={historyStatusFilter} onChange={(event) => setHistoryStatusFilter(event.target.value as HistoryStatusFilter)}>
-                    <option value="all">Todo</option>
-                    <option value="ok">Completado</option>
-                    <option value="partial">Con avisos</option>
-                    <option value="running">En curso</option>
-                    <option value="incomplete">Incompleto</option>
-                  </select>
-                </label>
-
-                <label className="settings-field" htmlFor="historyCategoryFilter">
-                  <span>Área</span>
-                  <select id="historyCategoryFilter" value={historyCategoryFilter} onChange={(event) => setHistoryCategoryFilter(event.target.value as "all" | CleanCategory)}>
-                    <option value="all">Todas</option>
-                    {allCategories.map((category) => (
-                      <option value={category.id} key={category.id}>{category.label}</option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="settings-field" htmlFor="historyFromDate">
-                  <span>Desde</span>
-                  <input id="historyFromDate" type="date" value={historyFromDate} onChange={(event) => setHistoryFromDate(event.target.value)} />
-                </label>
-
-                <label className="settings-field" htmlFor="historyToDate">
-                  <span>Hasta</span>
-                  <input id="historyToDate" type="date" value={historyToDate} onChange={(event) => setHistoryToDate(event.target.value)} />
-                </label>
-
-                <label className="settings-field" htmlFor="historySort">
-                  <span>Orden</span>
-                  <select id="historySort" value={historySort} onChange={(event) => setHistorySort(event.target.value as HistorySort)}>
-                    <option value="date_desc">Más recientes</option>
-                    <option value="date_asc">Más antiguas</option>
-                    <option value="reclaimed_desc">Más espacio liberado</option>
-                    <option value="errors_desc">Más avisos</option>
-                  </select>
-                </label>
-              </div>
-
-              <div className="command-strip">
-                <button disabled={loading} onClick={() => void loadHistory()}>
-                  <History size={17} /> Actualizar actividad
-                </button>
-                <button disabled={loading} onClick={exportHistoryReport}>
-                  <Download size={17} /> Exportar resumen
-                </button>
-                <button disabled={loading} onClick={resetHistoryFilters}>
-                  Restablecer filtros
-                </button>
-              </div>
-            </section>
-
-            <section className="cleaner-grid history-grid">
-              {filteredHistoryItems.map((entry) => (
-                <article className="cleaner-card" key={entry.run_id} data-selected={false}>
-                  <div className="card-topline">
-                    <span className={`risk-pill ${entry.status === "ok" ? "risk-low" : "risk-medium"}`}>
-                      {getHistoryStatusLabel(entry.status)}
-                    </span>
-                    <span>{entry.reclaimed_total_human}</span>
-                  </div>
-                  <h3>{formatEpoch(entry.started_at_epoch_secs)}</h3>
-                  <p className="mono-path">{entry.log_file}</p>
-                  <small>
-                    {entry.deleted_count} elementos liberados · {entry.error_count} avisos · {entry.candidate_count} revisados
-                  </small>
-                </article>
-              ))}
-
-              {filteredHistoryItems.length === 0 && (
-                <div className="empty-state">
-                  <History size={28} />
-                  <h3>Sin actividad para estos filtros</h3>
-                  <p>Ajusta los filtros o realiza una revisión para ver nueva actividad.</p>
-                </div>
-              )}
-            </section>
-          </>
-        )}
-
         {view === "uninstall" && (
           <>
             <section className="section-heading">
               <div>
                 <p className="eyebrow muted">Apps instaladas</p>
-                <h2>Desinstalación</h2>
+                <h2>Desinstalador</h2>
               </div>
-              <span>{removableApps.length} apps disponibles para revisar</span>
+              <span>{removableApps.length} apps listas para desinstalar</span>
             </section>
 
             <section className="uninstall-preview">
               <article className="uninstall-panel">
                 <div className="metric-icon"><ShieldCheck size={19} /></div>
                 <h3>Apps detectadas</h3>
-                <p>Mac Cleaner revisa apps instaladas en Aplicaciones del sistema y del usuario.</p>
+                <p>Mac Cleaner detecta apps instaladas en Aplicaciones del sistema y del usuario.</p>
               </article>
               <article className="uninstall-panel">
                 <div className="metric-icon"><Trash2 size={19} /></div>
-                <h3>Retiro reversible</h3>
-                <p>La app seleccionada se mueve a la Papelera. Si cambias de opinión, puedes restaurarla antes de vaciarla.</p>
+                <h3>Desinstalación reversible</h3>
+                <p>La app seleccionada y sus residuos se mueven a la Papelera.</p>
               </article>
               <article className="uninstall-panel">
                 <div className="metric-icon"><Files size={19} /></div>
                 <h3>Sin archivos personales</h3>
-                <p>No se tocan documentos del usuario ni rutas libres fuera de la revisión permitida.</p>
+                <p>No se tocan documentos del usuario ni rutas libres fuera de las reglas permitidas.</p>
               </article>
             </section>
 
@@ -742,10 +514,10 @@ export default function App() {
 
               <div className="command-strip">
                 <button disabled={loading} onClick={() => void loadInstalledApps()}>
-                  <Search size={17} /> Revisar apps
+                  <Search size={17} /> Escanear apps
                 </button>
                 <button disabled={loading || selectedAppIds.length === 0} onClick={prepareSelectedAppsForUninstall}>
-                  <ShieldCheck size={17} /> Revisar desinstalación
+                  <ShieldCheck size={17} /> Preparar desinstalación
                 </button>
                 <button disabled={loading || !appUninstallPlan || appUninstallPlan.items.length === 0} className="danger-action" onClick={runAppUninstall}>
                   <Trash2 size={17} /> Mover a la Papelera
@@ -775,8 +547,8 @@ export default function App() {
                 {installedApps.length === 0 && (
                   <div className="empty-state compact">
                     <Trash2 size={28} />
-                    <h3>Sin apps revisadas todavía</h3>
-                    <p>Inicia una revisión para ver las apps que pueden retirarse de forma segura.</p>
+                    <h3>Sin apps escaneadas todavía</h3>
+                    <p>Escanea apps instaladas para preparar una desinstalación segura.</p>
                   </div>
                 )}
               </div>
@@ -785,7 +557,7 @@ export default function App() {
             {appUninstallPlan && (
               <section className="glass-panel">
                 <div className="panel-heading">
-                  <h2>Revisión antes de retirar</h2>
+                  <h2>Archivos que se moverán</h2>
                   <span>{appUninstallPlan.total_human} preparado para mover a la Papelera</span>
                 </div>
                 <div className="dryrun-table uninstall-plan">
@@ -799,7 +571,7 @@ export default function App() {
                   {appUninstallPlan.leftovers.map((item) => (
                     <div className="dryrun-row" key={item.id}>
                       <span>{item.size_human}</span>
-                      <span>Rastro asociado</span>
+                      <span>Residuo</span>
                       <code>{item.path}</code>
                     </div>
                   ))}
@@ -815,19 +587,40 @@ export default function App() {
           </>
         )}
 
+        {view === "files" && (
+          <>
+            <section className="section-heading">
+              <div>
+                <p className="eyebrow muted">Espacio</p>
+                <h2>Archivos grandes y carpetas pesadas</h2>
+              </div>
+              <span>Complemento para recuperar espacio</span>
+            </section>
+
+            <section className="command-strip">
+              <button disabled={loading} onClick={() => runAction(() => findLargeFiles(preferences.largeFilesThreshold), (data) => setOutput(data.stdout))}>
+                Archivos grandes ({preferences.largeFilesThreshold}+)
+              </button>
+              <button disabled={loading} onClick={() => runAction(getTopDirs, (data) => setOutput(data.stdout))}>
+                Carpetas pesadas
+              </button>
+            </section>
+          </>
+        )}
+
         {view === "settings" && (
           <>
             <section className="section-heading">
               <div>
-                <p className="eyebrow muted">Preferencias</p>
-                <h2>Cuidado por defecto</h2>
+                <p className="eyebrow muted">Ajustes</p>
+                <h2>Comportamiento de limpieza</h2>
               </div>
               <span>Guardado en este Mac</span>
             </section>
 
             <section className="glass-panel">
               <div className="panel-heading">
-                <h2>Preferencias de cuidado</h2>
+                <h2>Ajustes de limpieza</h2>
                 <span>En este Mac</span>
               </div>
               <div className="settings-grid">
@@ -850,7 +643,7 @@ export default function App() {
                 </label>
 
                 <div className="settings-field">
-                  <span>Áreas incluidas por defecto</span>
+                  <span>Categorías incluidas por defecto</span>
                   <div className="prefs-categories">
                     {allCategories.map((category) => (
                       <label key={category.id}>
@@ -866,7 +659,7 @@ export default function App() {
                 </div>
 
                 <label className="settings-field" htmlFor="historyRetentionDays">
-                  <span>Conservar actividad (días)</span>
+                  <span>Conservar resultados (días)</span>
                   <input
                     id="historyRetentionDays"
                     type="number"
@@ -884,7 +677,7 @@ export default function App() {
                 </label>
 
                 <label className="settings-field" htmlFor="historyExportLimit">
-                  <span>Actividades incluidas en resúmenes</span>
+                  <span>Resultados incluidos en soporte</span>
                   <input
                     id="historyExportLimit"
                     type="number"
@@ -904,10 +697,13 @@ export default function App() {
 
               <div className="command-strip">
                 <button disabled={!scan || loading} onClick={applyDefaultSelectionToCurrentScan}>
-                  Usar estas áreas ahora
+                  Usar estas categorías ahora
                 </button>
-                <button disabled={loading} onClick={applyHistoryRetentionNow}>
-                  Actualizar actividad guardada
+                <button disabled={loading} onClick={applyResultsRetentionNow}>
+                  Limpiar resultados antiguos
+                </button>
+                <button disabled={loading} onClick={exportResultsReport}>
+                  Exportar resultado técnico
                 </button>
               </div>
             </section>
@@ -917,8 +713,8 @@ export default function App() {
         {output && (
           <section className="glass-panel">
             <div className="panel-heading">
-              <h2>Detalles</h2>
-              <span>Para soporte o revisión avanzada</span>
+              <h2>Resultado inmediato</h2>
+              <span>Detalle técnico para soporte</span>
             </div>
             <pre>{output}</pre>
           </section>
