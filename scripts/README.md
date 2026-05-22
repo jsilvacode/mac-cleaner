@@ -1,22 +1,19 @@
 # Scripts
 
-`mac_cleaner_v2.sh` es el motor seguro transitorio del proyecto.
+Este directorio contiene utilidades de desarrollo usadas durante validación local.
 
-## Uso directo
+Estos archivos no son la interfaz pública del producto. El usuario debe interactuar con Mac Cleaner desde la app de macOS.
+
+## Uso De Desarrollo
 
 ```bash
 ./mac_cleaner_v2.sh scan --json
 ./mac_cleaner_v2.sh dry-run --json
-./mac_cleaner_v2.sh dry-run --json --categories user_cache,user_logs
-./mac_cleaner_v2.sh clean
 ./mac_cleaner_v2.sh clean --yes
-./mac_cleaner_v2.sh clean --yes --categories user_cache,user_logs
+./mac_cleaner_v2.sh large-files 1G
+./mac_cleaner_v2.sh top-dirs
 ```
 
-## Rol dentro de Tauri
+## Nota De Seguridad
 
-Rust invoca este script solo mediante comandos allowlist. El frontend nunca lo ejecuta directamente.
-
-## Migración futura
-
-La lógica de escaneo, cálculo de tamaño y limpieza segura debe migrarse progresivamente a Rust. Shell debe quedar como fallback o herramienta auxiliar.
+El uso directo de scripts está pensado para desarrollo y verificación. Los flujos de producto deben realizarse desde la app, donde se presentan revisión y confirmación de forma clara.
