@@ -11,6 +11,7 @@ Sprint 4 validates the current Phase 4 MVP after premium product copy, navigatio
 - Frontend production build.
 - Rust unit tests.
 - Safe app uninstall smoke test with a dummy `.app` inside a temporary HOME.
+- Tauri desktop startup smoke test.
 - Browser visual check for the premium navigation and uninstall section.
 - Browser preview fallback message for actions that require Tauri desktop.
 - Release notes and signing/notarization checklist refreshed.
@@ -21,6 +22,7 @@ Sprint 4 validates the current Phase 4 MVP after premium product copy, navigatio
 npm run build
 cargo test
 cargo test smoke_uninstall_dummy_app_moves_to_temp_trash -- --ignored --test-threads=1
+npm run tauri:dev
 ```
 
 ## Results
@@ -28,6 +30,7 @@ cargo test smoke_uninstall_dummy_app_moves_to_temp_trash -- --ignored --test-thr
 - `npm run build`: passed.
 - `cargo test`: passed with 8 active tests and 1 ignored smoke test.
 - `smoke_uninstall_dummy_app_moves_to_temp_trash`: passed when run explicitly.
+- `npm run tauri:dev`: passed startup smoke test. Vite started, Rust/Tauri compiled, and `target/debug/mac-cleaner-tauri` launched without startup errors.
 - Browser preview console: no errors observed.
 
 ## Screenshots
@@ -70,7 +73,7 @@ Expected and observed behavior:
 
 ## Product QA Notes
 
-- Main navigation now matches the product model: `Inicio`, `Espacio`, `Actividad`, `Ajustes`, `Desinstalar`.
+- Main navigation now matches the product model: `Inicio`, `Espacio`, `Actividad`, `Desinstalar`, `Ajustes`.
 - The interface avoids exposing implementation terms in primary screens.
 - The uninstall flow uses safer language: review first, confirmation, move to Trash.
 - Advanced or support details remain available without dominating the primary experience.

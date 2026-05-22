@@ -49,7 +49,7 @@
 
 ## Product Experience
 
-- Premium navigation: `Inicio`, `Espacio`, `Actividad`, `Ajustes`, `Desinstalar`.
+- Premium navigation: `Inicio`, `Espacio`, `Actividad`, `Desinstalar`, `Ajustes`.
 - User-friendly Spanish microcopy for non-technical Mac owners.
 - Activity filters by status, date range, area and sort order.
 - Advanced preferences for activity retention and export size.

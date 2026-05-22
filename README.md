@@ -59,7 +59,7 @@ El frontend nunca borra archivos. El frontend solicita acciones al backend Rust.
 - Exportación de reporte de historial a `~/Library/Logs/mac_cleaner_tauri_agent/reports/`.
 - Preferencias locales avanzadas: categorías por defecto, threshold de archivos grandes, retención de logs y límite de exportación.
 - Microcopy premium orientado a usuarios no técnicos.
-- Navegación de producto: `Inicio`, `Espacio`, `Actividad`, `Ajustes`, `Desinstalar`.
+- Navegación de producto: `Inicio`, `Espacio`, `Actividad`, `Desinstalar`, `Ajustes`.
 - Desinstalación segura de apps instaladas con revisión previa, confirmación explícita y movimiento reversible a la Papelera.
 - QA Sprint 4 documentado en `docs/QA_SPRINT4_REPORT.md`.
 
