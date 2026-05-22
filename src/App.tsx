@@ -48,10 +48,10 @@ const formatGb = (kb: number) => `${(kb / 1024 / 1024).toFixed(2)} GB`;
 const PREFERENCES_KEY = "mac_cleaner_preferences_v2";
 
 const allCategories: Array<{ id: CleanCategory; label: string }> = [
-  { id: "user_cache", label: "Caché antiguo" },
-  { id: "user_logs", label: "Actividad antigua" },
+  { id: "user_cache", label: "Caché de apps" },
+  { id: "user_logs", label: "Registros antiguos" },
   { id: "trash", label: "Papelera" },
-  { id: "tmp", label: "Temporales seguros" },
+  { id: "tmp", label: "Temporales" },
 ];
 
 const allowedThresholds: LargeFilesThreshold[] = ["500M", "1G", "2G", "5G"];
@@ -64,9 +64,9 @@ const defaultPreferences: CleaningPreferences = {
 };
 
 const riskMeta: Record<RiskLevel, { label: string; className: string; text: string }> = {
-  bajo: { label: "Listo", className: "risk-low", text: "Seguro para revisar" },
-  medio: { label: "Revisar", className: "risk-medium", text: "Confirmación recomendada" },
-  alto: { label: "Con cuidado", className: "risk-high", text: "Revisión especial" },
+  bajo: { label: "Bajo riesgo", className: "risk-low", text: "Listo para limpiar tras revisar" },
+  medio: { label: "Revisión", className: "risk-medium", text: "Confirma antes de liberar" },
+  alto: { label: "Cuidado", className: "risk-high", text: "Revisión especial" },
 };
 
 type AppView = "overview" | "files" | "history" | "settings" | "uninstall";
@@ -170,6 +170,10 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem(PREFERENCES_KEY, JSON.stringify(preferences));
   }, [preferences]);
+
+  useEffect(() => {
+    void runAction(scanCleanable, applyScanResult);
+  }, []);
 
   useEffect(() => {
     if (view === "history" && !historyLoaded) {
@@ -325,7 +329,7 @@ export default function App() {
       return;
     }
 
-    const ok = window.confirm("Mac Cleaner liberará espacio solo en las áreas revisadas. Nada fuera de esta selección será tocado. ¿Continuar?");
+    const ok = window.confirm("Mac Cleaner eliminará los elementos revisados en caché, logs, temporales y Papelera. Nada fuera de esta selección será tocado. ¿Continuar?");
     if (!ok) {
       return;
     }
@@ -372,8 +376,9 @@ export default function App() {
     }
 
     const appNames = appUninstallPlan.items.map((item) => item.name).join(", ");
+    const leftoverCount = appUninstallPlan.leftovers.length;
     const ok = window.confirm(
-      `Mac Cleaner moverá a la Papelera: ${appNames}. No eliminará documentos personales ni datos de otras ubicaciones. ¿Continuar?`,
+      `Mac Cleaner moverá a la Papelera: ${appNames}${leftoverCount > 0 ? ` y ${leftoverCount} rastros asociados` : ""}. Revisa que no necesites esos datos antes de continuar. ¿Continuar?`,
     );
     if (!ok) {
       return;
@@ -381,7 +386,7 @@ export default function App() {
 
     const idsToMove = appUninstallPlan.items.map((item) => item.id);
     runAction(() => uninstallAppsToTrash(idsToMove), (data) => {
-      setOutput(`Apps movidas a la Papelera: ${data.moved_count}. Tamaño trasladado: ${data.moved_total_human}. Omitidas: ${data.skipped_count}.`);
+      setOutput(`Elementos movidos a la Papelera: ${data.moved_count}. Tamaño trasladado: ${data.moved_total_human}. Omitidos: ${data.skipped_count}.`);
       setSelectedAppIds([]);
       setAppUninstallPlan(null);
       setAppsLoaded(false);
@@ -395,7 +400,7 @@ export default function App() {
           <div className="brand-mark"><Sparkles size={19} /></div>
           <div>
             <strong>Mac Cleaner</strong>
-            <span>Cuidado local para Mac</span>
+            <span>Limpieza local para Mac</span>
           </div>
         </div>
 
@@ -420,8 +425,8 @@ export default function App() {
         <div className="engine-card">
           <span className="status-dot" />
           <div>
-            <strong>Protección activa</strong>
-            <p>Nada se elimina sin tu confirmación.</p>
+            <strong>Motor local activo</strong>
+            <p>Escanea, revisa y limpia en este Mac.</p>
           </div>
         </div>
       </aside>
@@ -437,16 +442,16 @@ export default function App() {
             >
               <div className="hero-copy">
                 <p className="eyebrow"><Activity size={15} /> Cuidado premium para macOS</p>
-                <h1>Tu Mac, más ligero y en orden.</h1>
+                <h1>Libera caché, temporales y Papelera.</h1>
                 <p className="lead">
-                  Revisa espacio recuperable, confirma con calma y libera solo lo que ya fue preparado de forma segura.
+                  Encuentra archivos recuperables, revisa exactamente qué se borrará y ejecuta una limpieza local efectiva.
                 </p>
                 <div className="hero-actions">
                   <button className="primary-action" disabled={loading} onClick={() => runAction(scanCleanable, applyScanResult)}>
-                    <Search size={18} /> Revisar mi Mac
+                    <Search size={18} /> Buscar espacio
                   </button>
                   <button className="secondary-action" disabled={loading || !scan} onClick={runDryRunForSelection}>
-                    <TerminalSquare size={18} /> Revisar antes de limpiar
+                    <TerminalSquare size={18} /> Ver lo que se borrará
                   </button>
                 </div>
               </div>
@@ -455,15 +460,15 @@ export default function App() {
                 <div className="orbital-ring" />
                 <span>Espacio recuperable</span>
                 <strong>{totalKb > 0 ? formatGb(totalKb) : "--"}</strong>
-                <small>{scan ? `${scan.items.length} áreas revisadas` : "Inicia una revisión para comenzar"}</small>
+                <small>{scan ? `${scan.items.length} áreas revisadas` : "Escaneando este Mac"}</small>
               </div>
             </motion.section>
 
             <section className="metrics-grid">
-              <MetricCard icon={<HardDrive size={19} />} label="Espacio recuperable" value={totalKb > 0 ? formatGb(totalKb) : "0.00 GB"} note="Se libera solo después de revisar." />
-              <MetricCard icon={<CheckCircle2 size={19} />} label="Áreas listas" value={String(safeItems)} note="Zonas de menor riesgo para revisar." />
-              <MetricCard icon={<AlertTriangle size={19} />} label="Para mirar con calma" value={String(reviewItems)} note="Requieren una confirmación más consciente." />
-              <MetricCard icon={<Database size={19} />} label="Áreas elegidas" value={String(selectedCategories.length)} note={dryRun ? `${dryRun.candidates.length} elementos preparados.` : "Elige qué quieres revisar."} />
+              <MetricCard icon={<HardDrive size={19} />} label="Espacio recuperable" value={totalKb > 0 ? formatGb(totalKb) : "0.00 GB"} note="Caché, temporales, logs y Papelera." />
+              <MetricCard icon={<CheckCircle2 size={19} />} label="Bajo riesgo" value={String(safeItems)} note="Áreas listas para revisión rápida." />
+              <MetricCard icon={<AlertTriangle size={19} />} label="Requieren confirmación" value={String(reviewItems)} note="Se limpian solo si las apruebas." />
+              <MetricCard icon={<Database size={19} />} label="Áreas elegidas" value={String(selectedCategories.length)} note={dryRun ? `${dryRun.candidates.length} elementos preparados.` : "Selecciona qué limpiar."} />
             </section>
           </>
         )}
@@ -486,14 +491,14 @@ export default function App() {
                 {view === "files" && "Encuentra lo que ocupa más."}
                 {view === "history" && "Tu actividad reciente."}
                 {view === "settings" && "Cuidado a tu medida."}
-                {view === "uninstall" && "Desinstala apps con calma."}
+                {view === "uninstall" && "Desinstala apps instaladas."}
               </h1>
             </div>
             <span>
               {view === "files" && "Solo revisión, sin borrar."}
               {view === "history" && `${historyItems.length} actividades guardadas.`}
               {view === "settings" && "Guardado en este Mac."}
-              {view === "uninstall" && "A la Papelera, sin tocar archivos personales."}
+              {view === "uninstall" && "A la Papelera, con revisión previa."}
             </span>
           </motion.section>
         )}
@@ -519,7 +524,7 @@ export default function App() {
                 <p className="eyebrow muted">Áreas revisadas</p>
                 <h2>Recomendaciones</h2>
               </div>
-              <span>{scan ? "Listo para revisar" : "Sin revisión reciente"}</span>
+              <span>{scan ? "Listo para limpiar" : "Escaneo pendiente"}</span>
             </section>
 
             <section className="cleaner-grid">
@@ -556,7 +561,7 @@ export default function App() {
                 <div className="empty-state">
                   <Sparkles size={28} />
                   <h3>Revisión pendiente</h3>
-                  <p>Inicia una revisión para ver espacio recuperable y recomendaciones seguras.</p>
+                  <p>Busca espacio recuperable para preparar una limpieza real de caché, temporales y Papelera.</p>
                 </div>
               )}
             </section>
@@ -564,8 +569,8 @@ export default function App() {
             {dryRun && (
               <section className="glass-panel">
                 <div className="panel-heading">
-                  <h2>Revisión antes de limpiar</h2>
-                  <span>{dryRun.candidates.length} elementos listos para revisar</span>
+                  <h2>Elementos que se borrarán</h2>
+                  <span>{dryRun.candidates.length} elementos preparados</span>
                 </div>
                 <div className="dryrun-table">
                   {dryRun.candidates.slice(0, 80).map((candidate) => (
@@ -706,7 +711,7 @@ export default function App() {
             <section className="section-heading">
               <div>
                 <p className="eyebrow muted">Apps instaladas</p>
-                <h2>Retiro seguro</h2>
+                <h2>Desinstalación</h2>
               </div>
               <span>{removableApps.length} apps disponibles para revisar</span>
             </section>
@@ -714,8 +719,8 @@ export default function App() {
             <section className="uninstall-preview">
               <article className="uninstall-panel">
                 <div className="metric-icon"><ShieldCheck size={19} /></div>
-                <h3>Primero revisamos</h3>
-                <p>Mac Cleaner solo ofrece apps encontradas en ubicaciones permitidas: Aplicaciones del sistema y del usuario.</p>
+                <h3>Apps detectadas</h3>
+                <p>Mac Cleaner revisa apps instaladas en Aplicaciones del sistema y del usuario.</p>
               </article>
               <article className="uninstall-panel">
                 <div className="metric-icon"><Trash2 size={19} /></div>
@@ -724,8 +729,8 @@ export default function App() {
               </article>
               <article className="uninstall-panel">
                 <div className="metric-icon"><Files size={19} /></div>
-                <h3>Tus archivos quedan quietos</h3>
-                <p>No se eliminan documentos personales, preferencias, contenedores ni datos internos de otras ubicaciones.</p>
+                <h3>Sin archivos personales</h3>
+                <p>No se tocan documentos del usuario ni rutas libres fuera de la revisión permitida.</p>
               </article>
             </section>
 
@@ -740,7 +745,7 @@ export default function App() {
                   <Search size={17} /> Revisar apps
                 </button>
                 <button disabled={loading || selectedAppIds.length === 0} onClick={prepareSelectedAppsForUninstall}>
-                  <ShieldCheck size={17} /> Preparar retiro
+                  <ShieldCheck size={17} /> Revisar desinstalación
                 </button>
                 <button disabled={loading || !appUninstallPlan || appUninstallPlan.items.length === 0} className="danger-action" onClick={runAppUninstall}>
                   <Trash2 size={17} /> Mover a la Papelera
@@ -781,13 +786,20 @@ export default function App() {
               <section className="glass-panel">
                 <div className="panel-heading">
                   <h2>Revisión antes de retirar</h2>
-                  <span>{appUninstallPlan.total_human} se moverán a la Papelera</span>
+                  <span>{appUninstallPlan.total_human} preparado para mover a la Papelera</span>
                 </div>
                 <div className="dryrun-table uninstall-plan">
                   {appUninstallPlan.items.map((item) => (
                     <div className="dryrun-row" key={item.id}>
                       <span>{item.size_human}</span>
-                      <span>{item.destination_hint}</span>
+                      <span>App</span>
+                      <code>{item.path}</code>
+                    </div>
+                  ))}
+                  {appUninstallPlan.leftovers.map((item) => (
+                    <div className="dryrun-row" key={item.id}>
+                      <span>{item.size_human}</span>
+                      <span>Rastro asociado</span>
                       <code>{item.path}</code>
                     </div>
                   ))}

@@ -104,6 +104,20 @@ pub struct InstalledAppsResponse {
 pub struct AppUninstallPlanItem {
     pub id: String,
     pub name: String,
+    pub item_type: String,
+    pub path: String,
+    pub destination_hint: String,
+    pub size_kb: u64,
+    pub size_human: String,
+    pub risk: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AppUninstallLeftoverItem {
+    pub id: String,
+    pub app_id: String,
+    pub name: String,
+    pub item_type: String,
     pub path: String,
     pub destination_hint: String,
     pub size_kb: u64,
@@ -116,6 +130,7 @@ pub struct AppUninstallPlanResponse {
     pub version: String,
     pub mode: String,
     pub items: Vec<AppUninstallPlanItem>,
+    pub leftovers: Vec<AppUninstallLeftoverItem>,
     pub skipped: Vec<InstalledAppItem>,
     pub total_kb: u64,
     pub total_human: String,
@@ -125,6 +140,7 @@ pub struct AppUninstallPlanResponse {
 pub struct AppUninstallResultItem {
     pub id: String,
     pub name: String,
+    pub item_type: String,
     pub source_path: String,
     pub destination_path: Option<String>,
     pub moved_to_trash: bool,
@@ -146,6 +162,7 @@ pub struct AppUninstallResponse {
 
 const ALLOWED_CATEGORIES: [&str; 4] = ["user_cache", "user_logs", "trash", "tmp"];
 const APP_MIN_AGE_DAYS: u32 = 1;
+const MAX_CLEAN_CANDIDATES_PER_CATEGORY: usize = 10_000;
 const SYSTEM_APPLICATIONS_DIR: &str = "/Applications";
 const USER_APPLICATIONS_SUBDIR: &str = "Applications";
 const APP_TRASH_SUBDIR: &str = ".Trash/Mac Cleaner Apps";
@@ -546,28 +563,28 @@ fn build_scan_categories() -> Result<Vec<ScanCategory>, String> {
     Ok(vec![
         ScanCategory {
             id: "user_cache",
-            label: "Caché de usuario",
+            label: "Caché de apps",
             path: home.join("Library").join("Caches"),
-            age_days: 7,
+            age_days: 1,
             risk: "medio",
         },
         ScanCategory {
             id: "user_logs",
-            label: "Logs de usuario",
+            label: "Registros antiguos",
             path: home.join("Library").join("Logs"),
-            age_days: 14,
+            age_days: 7,
             risk: "bajo",
         },
         ScanCategory {
             id: "trash",
-            label: "Papelera de usuario",
+            label: "Papelera",
             path: home.join(".Trash"),
-            age_days: 7,
+            age_days: 1,
             risk: "medio",
         },
         ScanCategory {
             id: "tmp",
-            label: "Temporales /tmp",
+            label: "Archivos temporales",
             path: PathBuf::from("/tmp"),
             age_days: 1,
             risk: "medio",
@@ -614,32 +631,87 @@ fn size_kb(path: &PathBuf) -> u64 {
     total
 }
 
-fn estimate_cleanable_kb(path: &PathBuf, age_days: u32) -> u64 {
-    let Ok(meta) = fs::symlink_metadata(path) else {
-        return 0;
+fn is_path_inside_root(root: &Path, path: &Path) -> bool {
+    path == root || path.starts_with(root)
+}
+
+fn collect_recursive_file_candidates(
+    root: &Path,
+    current: &Path,
+    age_days: u32,
+    candidates: &mut Vec<(PathBuf, u64)>,
+) {
+    if candidates.len() >= MAX_CLEAN_CANDIDATES_PER_CATEGORY {
+        return;
+    }
+
+    if !is_path_inside_root(root, current) {
+        return;
+    }
+
+    let Ok(meta) = fs::symlink_metadata(current) else {
+        return;
+    };
+
+    if meta.file_type().is_symlink() {
+        return;
+    }
+
+    if meta.is_file() {
+        if is_older_than(&meta, age_days) {
+            candidates.push((current.to_path_buf(), meta.len().div_ceil(1024)));
+        }
+        return;
+    }
+
+    if !meta.is_dir() {
+        return;
+    }
+
+    let Ok(entries) = fs::read_dir(current) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        if candidates.len() >= MAX_CLEAN_CANDIDATES_PER_CATEGORY {
+            break;
+        }
+        collect_recursive_file_candidates(root, &entry.path(), age_days, candidates);
+    }
+}
+
+fn collect_trash_candidates(category: &ScanCategory) -> Vec<(PathBuf, u64)> {
+    let Ok(meta) = fs::symlink_metadata(&category.path) else {
+        return Vec::new();
     };
 
     if meta.file_type().is_symlink() || !meta.is_dir() {
-        return 0;
+        return Vec::new();
     }
 
-    let Ok(entries) = fs::read_dir(path) else {
-        return 0;
+    let Ok(entries) = fs::read_dir(&category.path) else {
+        return Vec::new();
     };
 
-    let mut total = 0_u64;
+    let mut candidates = Vec::new();
     for entry in entries.flatten() {
         let target = entry.path();
         let Ok(target_meta) = fs::symlink_metadata(&target) else {
             continue;
         };
-        if target_meta.file_type().is_symlink() || !is_older_than(&target_meta, age_days) {
+        if target_meta.file_type().is_symlink()
+            || !is_path_inside_root(&category.path, &target)
+            || !is_older_than(&target_meta, category.age_days)
+        {
             continue;
         }
-        total += size_kb(&target);
+        candidates.push((target.clone(), size_kb(&target)));
+        if candidates.len() >= MAX_CLEAN_CANDIDATES_PER_CATEGORY {
+            break;
+        }
     }
 
-    total
+    candidates
 }
 
 fn human_size_kb(kb: u64) -> String {
@@ -823,9 +895,197 @@ fn validate_and_resolve_app_selection(
     Ok(selected)
 }
 
+fn safe_app_artifact_token(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 200
+        && value != "."
+        && value != ".."
+        && !value
+            .chars()
+            .any(|ch| ch == '/' || ch == '\\' || ch == ':' || ch.is_control())
+}
+
+fn app_bundle_identifier(app_path: &Path) -> Option<String> {
+    let info_plist = app_path.join("Contents").join("Info.plist");
+    let value = plist::Value::from_file(info_plist).ok()?;
+    let bundle_id = value
+        .as_dictionary()?
+        .get("CFBundleIdentifier")?
+        .as_string()?
+        .trim()
+        .to_string();
+
+    if safe_app_artifact_token(&bundle_id) {
+        Some(bundle_id)
+    } else {
+        None
+    }
+}
+
+fn push_leftover_if_present(
+    app: &InstalledAppItem,
+    label: &str,
+    path: PathBuf,
+    library_root: &Path,
+    seen: &mut HashSet<PathBuf>,
+    leftovers: &mut Vec<AppUninstallLeftoverItem>,
+) {
+    if !is_path_inside_root(library_root, &path) || !seen.insert(path.clone()) {
+        return;
+    }
+
+    let Ok(meta) = fs::symlink_metadata(&path) else {
+        return;
+    };
+    if meta.file_type().is_symlink() {
+        return;
+    }
+
+    let size_kb = if meta.is_file() {
+        meta.len().div_ceil(1024)
+    } else if meta.is_dir() {
+        size_kb(&path)
+    } else {
+        return;
+    };
+
+    leftovers.push(AppUninstallLeftoverItem {
+        id: format!("leftover:{}:{}", app.id, leftovers.len() + 1),
+        app_id: app.id.clone(),
+        name: format!("{} · {label}", app.name),
+        item_type: "leftover".to_string(),
+        path: path.display().to_string(),
+        destination_hint: "Papelera del usuario".to_string(),
+        size_kb,
+        size_human: human_size_kb(size_kb),
+        risk: "Rastro de la app; revisar antes de mover".to_string(),
+    });
+}
+
+fn collect_app_leftovers(app: &InstalledAppItem) -> Result<Vec<AppUninstallLeftoverItem>, String> {
+    let home = resolve_home()?;
+    let library = home.join("Library");
+    let app_path = PathBuf::from(&app.path);
+    let bundle_id = app_bundle_identifier(&app_path);
+    let mut leftovers = Vec::new();
+    let mut seen = HashSet::new();
+
+    if let Some(bundle_id) = bundle_id {
+        push_leftover_if_present(
+            app,
+            "caché",
+            library.join("Caches").join(&bundle_id),
+            &library,
+            &mut seen,
+            &mut leftovers,
+        );
+        push_leftover_if_present(
+            app,
+            "registros",
+            library.join("Logs").join(&bundle_id),
+            &library,
+            &mut seen,
+            &mut leftovers,
+        );
+        push_leftover_if_present(
+            app,
+            "preferencias",
+            library
+                .join("Preferences")
+                .join(format!("{bundle_id}.plist")),
+            &library,
+            &mut seen,
+            &mut leftovers,
+        );
+        push_leftover_if_present(
+            app,
+            "contenedor",
+            library.join("Containers").join(&bundle_id),
+            &library,
+            &mut seen,
+            &mut leftovers,
+        );
+        push_leftover_if_present(
+            app,
+            "estado guardado",
+            library
+                .join("Saved Application State")
+                .join(format!("{bundle_id}.savedState")),
+            &library,
+            &mut seen,
+            &mut leftovers,
+        );
+        push_leftover_if_present(
+            app,
+            "almacenamiento web",
+            library.join("HTTPStorages").join(&bundle_id),
+            &library,
+            &mut seen,
+            &mut leftovers,
+        );
+        push_leftover_if_present(
+            app,
+            "webkit",
+            library.join("WebKit").join(&bundle_id),
+            &library,
+            &mut seen,
+            &mut leftovers,
+        );
+        push_leftover_if_present(
+            app,
+            "scripts",
+            library.join("Application Scripts").join(&bundle_id),
+            &library,
+            &mut seen,
+            &mut leftovers,
+        );
+    }
+
+    if safe_app_artifact_token(&app.name) {
+        push_leftover_if_present(
+            app,
+            "soporte",
+            library.join("Application Support").join(&app.name),
+            &library,
+            &mut seen,
+            &mut leftovers,
+        );
+        push_leftover_if_present(
+            app,
+            "caché por nombre",
+            library.join("Caches").join(&app.name),
+            &library,
+            &mut seen,
+            &mut leftovers,
+        );
+        push_leftover_if_present(
+            app,
+            "registros por nombre",
+            library.join("Logs").join(&app.name),
+            &library,
+            &mut seen,
+            &mut leftovers,
+        );
+        push_leftover_if_present(
+            app,
+            "preferencias por nombre",
+            library
+                .join("Preferences")
+                .join(format!("{}.plist", app.name)),
+            &library,
+            &mut seen,
+            &mut leftovers,
+        );
+    }
+
+    leftovers.sort_by(|a, b| b.size_kb.cmp(&a.size_kb).then_with(|| a.path.cmp(&b.path)));
+    Ok(leftovers)
+}
+
 fn build_app_uninstall_plan(app_ids: Vec<String>) -> Result<AppUninstallPlanResponse, String> {
     let selected = validate_and_resolve_app_selection(app_ids)?;
     let mut items = Vec::new();
+    let mut leftovers = Vec::new();
     let mut skipped = Vec::new();
     let mut total_kb = 0_u64;
 
@@ -836,54 +1096,70 @@ fn build_app_uninstall_plan(app_ids: Vec<String>) -> Result<AppUninstallPlanResp
         }
 
         total_kb += app.size_kb;
+        let app_leftovers = collect_app_leftovers(&app)?;
+        total_kb += app_leftovers
+            .iter()
+            .map(|leftover| leftover.size_kb)
+            .sum::<u64>();
+
         items.push(AppUninstallPlanItem {
-            id: app.id,
-            name: app.name,
-            path: app.path,
+            id: app.id.clone(),
+            name: app.name.clone(),
+            item_type: "app".to_string(),
+            path: app.path.clone(),
             destination_hint: "Papelera del usuario".to_string(),
             size_kb: app.size_kb,
             size_human: app.size_human,
             risk: "Reversible desde la Papelera".to_string(),
         });
+        leftovers.extend(app_leftovers);
     }
 
     Ok(AppUninstallPlanResponse {
         version: "0.1.0-app-uninstall".to_string(),
         mode: "review".to_string(),
         items,
+        leftovers,
         skipped,
         total_kb,
         total_human: human_size_kb(total_kb),
     })
 }
 
-fn unique_trash_destination(app_name: &str) -> Result<PathBuf, String> {
+fn unique_trash_destination_entry(entry_name: &str) -> Result<PathBuf, String> {
     let home = resolve_home()?;
     let trash_dir = home.join(APP_TRASH_SUBDIR);
     fs::create_dir_all(&trash_dir)
         .map_err(|err| format!("No se pudo preparar la Papelera para apps: {err}"))?;
 
-    let base = trash_dir.join(app_name);
+    let base = trash_dir.join(entry_name);
     if !base.exists() {
         return Ok(base);
     }
 
+    let path = Path::new(entry_name);
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("item");
+    let extension = path.extension().and_then(|value| value.to_str());
     let timestamp = unix_timestamp_secs_unconditional();
     for index in 1..=50 {
-        let candidate = trash_dir
-            .join(format!(
-                "{}-{}-{}",
-                app_name.trim_end_matches(".app"),
-                timestamp,
-                index
-            ))
-            .with_extension("app");
+        let file_name = match extension {
+            Some(ext) if !ext.is_empty() => format!("{stem}-{timestamp}-{index}.{ext}"),
+            _ => format!("{stem}-{timestamp}-{index}"),
+        };
+        let candidate = trash_dir.join(file_name);
         if !candidate.exists() {
             return Ok(candidate);
         }
     }
 
     Err("No se pudo crear un destino único en la Papelera.".to_string())
+}
+
+fn unique_trash_destination(app_name: &str) -> Result<PathBuf, String> {
+    unique_trash_destination_entry(app_name)
 }
 
 fn unix_timestamp_secs_unconditional() -> u64 {
@@ -1006,33 +1282,27 @@ fn category_by_id<'a>(categories: &'a [ScanCategory], id: &str) -> Option<&'a Sc
 }
 
 fn collect_category_candidates(category: &ScanCategory) -> Vec<(PathBuf, u64)> {
-    let Ok(meta) = fs::symlink_metadata(&category.path) else {
-        return Vec::new();
+    let mut candidates = if category.id == "trash" {
+        collect_trash_candidates(category)
+    } else {
+        let mut recursive = Vec::new();
+        collect_recursive_file_candidates(
+            &category.path,
+            &category.path,
+            category.age_days,
+            &mut recursive,
+        );
+        recursive
     };
 
-    if meta.file_type().is_symlink() || !meta.is_dir() {
-        return Vec::new();
+    candidates.retain(|(path, _)| is_path_inside_root(&category.path, path));
+    candidates.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then_with(|| a.0.display().to_string().cmp(&b.0.display().to_string()))
+    });
+    if candidates.len() > MAX_CLEAN_CANDIDATES_PER_CATEGORY {
+        candidates.truncate(MAX_CLEAN_CANDIDATES_PER_CATEGORY);
     }
-
-    let Ok(entries) = fs::read_dir(&category.path) else {
-        return Vec::new();
-    };
-
-    let mut candidates = Vec::new();
-    for entry in entries.flatten() {
-        let target = entry.path();
-        let Ok(target_meta) = fs::symlink_metadata(&target) else {
-            continue;
-        };
-        if target_meta.file_type().is_symlink() || !is_older_than(&target_meta, category.age_days) {
-            continue;
-        }
-
-        let item_size_kb = size_kb(&target);
-        candidates.push((target, item_size_kb));
-    }
-
-    candidates.sort_by(|a, b| a.0.cmp(&b.0));
     candidates
 }
 
@@ -1383,7 +1653,10 @@ pub fn scan_cleanable() -> Result<ScanResponse, String> {
     let mut items = Vec::with_capacity(categories.len());
 
     for category in categories {
-        let estimated_kb = estimate_cleanable_kb(&category.path, category.age_days);
+        let estimated_kb = collect_category_candidates(&category)
+            .iter()
+            .map(|(_, size_kb)| *size_kb)
+            .sum();
         items.push(ScanItem {
             id: category.id.to_string(),
             label: category.label.to_string(),
@@ -1539,6 +1812,7 @@ pub fn uninstall_apps_to_trash(app_ids: Vec<String>) -> Result<AppUninstallRespo
                 results.push(AppUninstallResultItem {
                     id: item.id,
                     name: item.name,
+                    item_type: item.item_type,
                     source_path: path_display,
                     destination_path: None,
                     moved_to_trash: false,
@@ -1555,6 +1829,7 @@ pub fn uninstall_apps_to_trash(app_ids: Vec<String>) -> Result<AppUninstallRespo
             results.push(AppUninstallResultItem {
                 id: item.id,
                 name: item.name,
+                item_type: item.item_type,
                 source_path: path_display,
                 destination_path: None,
                 moved_to_trash: false,
@@ -1571,6 +1846,7 @@ pub fn uninstall_apps_to_trash(app_ids: Vec<String>) -> Result<AppUninstallRespo
             results.push(AppUninstallResultItem {
                 id: item.id,
                 name: item.name,
+                item_type: item.item_type,
                 source_path: path_display,
                 destination_path: None,
                 moved_to_trash: false,
@@ -1590,6 +1866,7 @@ pub fn uninstall_apps_to_trash(app_ids: Vec<String>) -> Result<AppUninstallRespo
                 results.push(AppUninstallResultItem {
                     id: item.id,
                     name: item.name,
+                    item_type: item.item_type,
                     source_path: path_display,
                     destination_path: Some(destination_display),
                     moved_to_trash: true,
@@ -1603,6 +1880,7 @@ pub fn uninstall_apps_to_trash(app_ids: Vec<String>) -> Result<AppUninstallRespo
                 results.push(AppUninstallResultItem {
                     id: item.id,
                     name: item.name,
+                    item_type: item.item_type,
                     source_path: path_display,
                     destination_path: None,
                     moved_to_trash: false,
@@ -1611,6 +1889,86 @@ pub fn uninstall_apps_to_trash(app_ids: Vec<String>) -> Result<AppUninstallRespo
                     error: Some(format!(
                         "No se pudo mover a la Papelera. macOS puede requerir permisos: {err}"
                     )),
+                });
+            }
+        }
+    }
+
+    let library = resolve_home()?.join("Library");
+    for item in plan.leftovers {
+        let source = PathBuf::from(&item.path);
+        let path_display = source.display().to_string();
+        let meta = match fs::symlink_metadata(&source) {
+            Ok(meta) => meta,
+            Err(err) => {
+                skipped_count += 1;
+                results.push(AppUninstallResultItem {
+                    id: item.id,
+                    name: item.name,
+                    item_type: item.item_type,
+                    source_path: path_display,
+                    destination_path: None,
+                    moved_to_trash: false,
+                    moved_size_kb: 0,
+                    moved_size_human: human_size_kb(0),
+                    error: Some(format!("El rastro ya no está disponible: {err}")),
+                });
+                continue;
+            }
+        };
+
+        if meta.file_type().is_symlink() || !is_path_inside_root(&library, &source) {
+            skipped_count += 1;
+            results.push(AppUninstallResultItem {
+                id: item.id,
+                name: item.name,
+                item_type: item.item_type,
+                source_path: path_display,
+                destination_path: None,
+                moved_to_trash: false,
+                moved_size_kb: 0,
+                moved_size_human: human_size_kb(0),
+                error: Some("Rastro omitido por seguridad.".to_string()),
+            });
+            continue;
+        }
+
+        let entry_name = source
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(|value| format!("{} - {value}", item.name.replace('/', "-")))
+            .unwrap_or_else(|| item.name.replace('/', "-"));
+        let destination = unique_trash_destination_entry(&entry_name)?;
+        let destination_display = destination.display().to_string();
+
+        match fs::rename(&source, &destination) {
+            Ok(_) => {
+                moved_count += 1;
+                moved_total_kb += item.size_kb;
+                results.push(AppUninstallResultItem {
+                    id: item.id,
+                    name: item.name,
+                    item_type: item.item_type,
+                    source_path: path_display,
+                    destination_path: Some(destination_display),
+                    moved_to_trash: true,
+                    moved_size_kb: item.size_kb,
+                    moved_size_human: item.size_human,
+                    error: None,
+                });
+            }
+            Err(err) => {
+                skipped_count += 1;
+                results.push(AppUninstallResultItem {
+                    id: item.id,
+                    name: item.name,
+                    item_type: item.item_type,
+                    source_path: path_display,
+                    destination_path: None,
+                    moved_to_trash: false,
+                    moved_size_kb: 0,
+                    moved_size_human: human_size_kb(0),
+                    error: Some(format!("No se pudo mover el rastro a la Papelera: {err}")),
                 });
             }
         }
@@ -1730,9 +2088,9 @@ pub fn apply_clean_history_retention(retention_days: u32) -> Result<PruneHistory
 #[cfg(test)]
 mod tests {
     use super::{
-        app_id_for, dry_run_cleaning, is_app_bundle, parse_threshold_to_bytes, scan_cleanable,
-        uninstall_apps_to_trash, validate_and_normalize_categories,
-        validate_and_resolve_app_selection,
+        app_id_for, collect_category_candidates, dry_run_cleaning, is_app_bundle,
+        parse_threshold_to_bytes, scan_cleanable, uninstall_apps_to_trash,
+        validate_and_normalize_categories, validate_and_resolve_app_selection, ScanCategory,
     };
     use std::env;
     use std::fs;
@@ -1798,6 +2156,55 @@ mod tests {
         )
         .expect("validation should succeed");
         assert_eq!(result, vec!["tmp".to_string(), "user_logs".to_string()]);
+    }
+
+    #[test]
+    fn recursive_candidates_find_nested_old_cache_files() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be valid")
+            .as_nanos();
+        let root = env::temp_dir().join(format!("mac-cleaner-recursive-{unique}"));
+        let external = env::temp_dir().join(format!("mac-cleaner-external-{unique}"));
+        let nested = root.join("Vendor").join("Product");
+        fs::create_dir_all(&nested).expect("nested cache dir should be created");
+
+        let old_file = nested.join("old-cache.bin");
+        let recent_file = nested.join("recent-cache.bin");
+        fs::write(&old_file, "old cache payload").expect("old cache file should be written");
+        fs::write(&recent_file, "recent cache payload").expect("recent file should be written");
+
+        let touch_status = Command::new("touch")
+            .args(["-t", "202001010000"])
+            .arg(&old_file)
+            .status()
+            .expect("touch should be available on macOS");
+        assert!(touch_status.success());
+
+        #[cfg(unix)]
+        {
+            let symlink = nested.join("external-link");
+            fs::write(&external, "outside").expect("external file should be written");
+            std::os::unix::fs::symlink(&external, &symlink)
+                .expect("symlink should be created for safety test");
+        }
+
+        let category = ScanCategory {
+            id: "user_cache",
+            label: "Caché de prueba",
+            path: root.clone(),
+            age_days: 1,
+            risk: "medio",
+        };
+        let candidates = collect_category_candidates(&category);
+        let paths: Vec<PathBuf> = candidates.into_iter().map(|(path, _)| path).collect();
+
+        assert!(paths.contains(&old_file));
+        assert!(!paths.contains(&recent_file));
+        assert!(paths.iter().all(|path| path.starts_with(&root)));
+
+        fs::remove_dir_all(&root).expect("temporary cache root should be removed");
+        let _ = fs::remove_file(&external);
     }
 
     #[test]

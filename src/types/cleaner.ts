@@ -84,6 +84,19 @@ export interface InstalledAppsResponse {
 export interface AppUninstallPlanItem {
   id: string;
   name: string;
+  item_type: "app" | string;
+  path: string;
+  destination_hint: string;
+  size_kb: number;
+  size_human: string;
+  risk: string;
+}
+
+export interface AppUninstallLeftoverItem {
+  id: string;
+  app_id: string;
+  name: string;
+  item_type: "leftover" | string;
   path: string;
   destination_hint: string;
   size_kb: number;
@@ -95,6 +108,7 @@ export interface AppUninstallPlanResponse {
   version: string;
   mode: "review";
   items: AppUninstallPlanItem[];
+  leftovers: AppUninstallLeftoverItem[];
   skipped: InstalledAppItem[];
   total_kb: number;
   total_human: string;
@@ -103,6 +117,7 @@ export interface AppUninstallPlanResponse {
 export interface AppUninstallResultItem {
   id: string;
   name: string;
+  item_type: "app" | "leftover" | string;
   source_path: string;
   destination_path: string | null;
   moved_to_trash: boolean;
