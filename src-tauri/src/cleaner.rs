@@ -1731,9 +1731,14 @@ pub fn apply_clean_history_retention(retention_days: u32) -> Result<PruneHistory
 mod tests {
     use super::{
         app_id_for, dry_run_cleaning, is_app_bundle, parse_threshold_to_bytes, scan_cleanable,
-        validate_and_normalize_categories, validate_and_resolve_app_selection,
+        uninstall_apps_to_trash, validate_and_normalize_categories,
+        validate_and_resolve_app_selection,
     };
+    use std::env;
+    use std::fs;
     use std::path::PathBuf;
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn scan_cleanable_returns_expected_categories() {
@@ -1808,5 +1813,53 @@ mod tests {
         let err = validate_and_resolve_app_selection(vec!["/Applications/Example.app".to_string()])
             .expect_err("free paths should not be accepted as app identifiers");
         assert!(err.contains("Identificador de app no permitido"));
+    }
+
+    #[test]
+    #[ignore = "Sprint 4 smoke test: moves a dummy .app inside a temporary HOME"]
+    fn smoke_uninstall_dummy_app_moves_to_temp_trash() {
+        let original_home = env::var("HOME").ok();
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be valid")
+            .as_nanos();
+        let temp_home = env::temp_dir().join(format!("mac-cleaner-smoke-{unique}"));
+        let apps_dir = temp_home.join("Applications");
+        let dummy_app = apps_dir.join("Sprint Smoke.app");
+        let dummy_contents = dummy_app.join("Contents").join("MacOS");
+
+        fs::create_dir_all(&dummy_contents).expect("dummy app bundle should be created");
+        fs::write(dummy_contents.join("smoke"), "safe dummy app")
+            .expect("dummy app file should be written");
+
+        let touch_status = Command::new("touch")
+            .args(["-t", "202001010000"])
+            .arg(&dummy_app)
+            .status()
+            .expect("touch should be available on macOS");
+        assert!(touch_status.success());
+
+        env::set_var("HOME", &temp_home);
+        let result = uninstall_apps_to_trash(vec!["user:Sprint Smoke.app".to_string()])
+            .expect("dummy app should move to temporary trash");
+
+        assert_eq!(result.moved_count, 1);
+        assert!(result.items[0].moved_to_trash);
+        assert!(!dummy_app.exists());
+        let destination = PathBuf::from(
+            result.items[0]
+                .destination_path
+                .as_ref()
+                .expect("destination should be returned"),
+        );
+        assert!(destination.exists());
+        assert!(destination.starts_with(temp_home.join(".Trash").join("Mac Cleaner Apps")));
+
+        if let Some(home) = original_home {
+            env::set_var("HOME", home);
+        } else {
+            env::remove_var("HOME");
+        }
+        fs::remove_dir_all(&temp_home).expect("temporary HOME should be removed");
     }
 }

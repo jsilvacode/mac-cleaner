@@ -48,13 +48,32 @@ El frontend nunca borra archivos. El frontend solicita acciones al backend Rust.
 - `get_clean_history`: historial local desde logs JSONL nativos
 - `export_clean_history_report`: exporta reporte Markdown del historial local
 - `apply_clean_history_retention`: poda historial nativo por política de días
+- `scan_installed_apps`: revisa apps instaladas en ubicaciones permitidas
+- `prepare_app_uninstall`: prepara una revisión previa para retirar apps
+- `uninstall_apps_to_trash`: mueve apps elegibles a la Papelera del usuario
 
-## Phase 4 (in progress)
+## Phase 4
 
 - Historial local integrado en backend y UI.
 - Filtros de historial por estado, rango, categoría y orden.
 - Exportación de reporte de historial a `~/Library/Logs/mac_cleaner_tauri_agent/reports/`.
 - Preferencias locales avanzadas: categorías por defecto, threshold de archivos grandes, retención de logs y límite de exportación.
+- Microcopy premium orientado a usuarios no técnicos.
+- Navegación de producto: `Inicio`, `Espacio`, `Actividad`, `Ajustes`, `Desinstalar`.
+- Desinstalación segura de apps instaladas con revisión previa, confirmación explícita y movimiento reversible a la Papelera.
+- QA Sprint 4 documentado en `docs/QA_SPRINT4_REPORT.md`.
+
+## Safe App Uninstall
+
+El flujo de desinstalación no acepta rutas libres desde la UI. Rust vuelve a resolver cada app por identificador interno antes de actuar.
+
+- Ubicaciones permitidas: `/Applications` y `~/Applications`.
+- Acción: mover `.app` elegibles a `~/.Trash/Mac Cleaner Apps`.
+- No usa `sudo`.
+- No sigue symlinks.
+- Omite apps protegidas de macOS.
+- Omite apps instaladas o modificadas recientemente.
+- No elimina documentos personales, preferencias, contenedores ni datos internos de otras ubicaciones.
 
 ## Interface direction
 
@@ -68,3 +87,4 @@ Este proyecto se distribuye bajo licencia **GNU AGPL-3.0**. Consulta el archivo 
 
 - `RELEASE_NOTES_v0.1.0.md`
 - `docs/MACOS_SIGNING_NOTARIZATION_CHECKLIST.md`
+- `docs/QA_SPRINT4_REPORT.md`

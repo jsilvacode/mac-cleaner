@@ -44,7 +44,12 @@
   - clean confirmation flow
   - large files
   - top dirs
+  - activity filters
+  - settings persistence
+  - safe app uninstall review flow
+  - dummy app uninstall to Trash
 - Capture release QA report.
+- Capture product screenshots for `Inicio`, `Actividad`, `Ajustes` and `Desinstalar`.
 
 ## 7) Operational safeguards
 
