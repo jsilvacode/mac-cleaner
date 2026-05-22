@@ -1,35 +1,33 @@
 # Mac Cleaner
 
-Mac Cleaner es una utilidad premium para macOS diseñada para ayudar a las personas a entender, revisar y recuperar espacio en su Mac con calma.
+Mac Cleaner es una app para macOS que ayuda a revisar y liberar espacio de forma segura.
 
-El producto se centra en claridad y control: muestra qué se puede revisar, solicita confirmación antes de actuar y mantiene los archivos personales fuera de los flujos sensibles.
+La app muestra áreas que pueden revisarse, permite confirmar antes de actuar y evita incluir documentos personales en sus flujos de limpieza o desinstalación.
 
 ## Qué Hace
 
-- Revisa áreas que suelen acumular archivos innecesarios.
+- Revisa áreas comunes donde se acumulan archivos innecesarios.
 - Muestra espacio potencial antes de liberar nada.
-- Ayuda a identificar archivos y carpetas grandes para revisión manual.
-- Mantiene una vista local de actividad reciente.
-- Permite ajustar cuánto historial de actividad conservar.
-- Ayuda a retirar apps instaladas moviéndolas a la Papelera.
+- Ayuda a revisar archivos y carpetas grandes.
+- Muestra actividad reciente de limpieza.
+- Permite ajustar preferencias básicas de uso.
+- Permite retirar apps instaladas moviéndolas a la Papelera.
 
-## Principios Del Producto
+## Principios
 
 - Revisar antes de actuar.
-- No solicitar permisos elevados en la versión inicial.
+- Pedir confirmación antes de cambios sensibles.
+- Evitar permisos elevados en la versión inicial.
 - No aceptar rutas arbitrarias desde la interfaz para acciones sensibles.
 - Mantener documentos personales fuera de los procesos de limpieza y desinstalación.
-- Priorizar acciones reversibles cuando sea posible.
 
-## Experiencia Actual
+## Secciones
 
-La app se organiza en cinco secciones:
-
-- `Inicio`: estado general y entrada guiada a la limpieza.
-- `Espacio`: herramientas para revisar archivos y carpetas.
+- `Inicio`: vista general y acceso a limpieza guiada.
+- `Espacio`: revisión de archivos y carpetas.
 - `Actividad`: historial reciente y resúmenes.
 - `Desinstalar`: retiro guiado de apps.
-- `Ajustes`: preferencias para personalizar la experiencia.
+- `Ajustes`: preferencias de uso.
 
 ## Desarrollo
 

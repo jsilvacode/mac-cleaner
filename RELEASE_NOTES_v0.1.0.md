@@ -8,7 +8,7 @@ Esta versión está enfocada en ayudar al usuario a decidir con confianza: revis
 
 ## Destacados
 
-- Interfaz premium orientada a macOS y usuarios no técnicos.
+- Interfaz clara orientada a macOS y usuarios no técnicos.
 - Flujo de limpieza guiado con revisión previa.
 - Herramientas para revisar archivos y carpetas grandes.
 - Actividad local con filtros y resúmenes.

@@ -15,3 +15,14 @@ docs-private/
 *.mobileprovision
 secrets/
 credentials/
+
+# Private product strategy docs
+PRODUCT.md
+Product.md
+product.md
+PRODUCT_*.md
+Product_*.md
+product_*.md
+*PRODUCT*.md
+*Product*.md
+*product*.md
