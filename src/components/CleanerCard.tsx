@@ -41,6 +41,8 @@ export function CleanerCard({
       initial={{ opacity: 0, y: 14 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 10 }}
+      whileHover={{ y: -2, scale: 1.02 }}
+      whileTap={{ scale: 0.98 }}
       transition={{ duration: 0.28, delay: index * 0.035, ease: "easeOut" }}
       data-selected={selected}
     >

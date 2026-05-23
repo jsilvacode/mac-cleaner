@@ -46,7 +46,7 @@ export function CleanerView({
           <Search size={17} /> Escanear basura
         </button>
         <button disabled={loading || !scan} onClick={onPrepareCleaning}>
-          <ShieldCheck size={17} /> Preparar limpieza
+          <ShieldCheck size={17} /> Analizar espacio
         </button>
         <button disabled={loading || !dryRun} className="danger-action" onClick={onRunCleaning}>
           <Play size={17} /> Limpiar ahora {selectedCategories.length > 0 ? `(${selectedCategories.length})` : ""}
@@ -56,7 +56,7 @@ export function CleanerView({
       <section className="section-heading">
         <div>
           <p className="eyebrow muted">Basura técnica</p>
-          <h2>Categorías para limpiar</h2>
+          <h2>Categorías para analizar y limpiar</h2>
         </div>
         <span>{scan ? "Listo para limpiar" : "Escaneo pendiente"}</span>
       </section>
@@ -102,7 +102,7 @@ export function CleanerView({
       {dryRun && (
         <section className="glass-panel">
           <div className="panel-heading">
-            <h2>Archivos basura preparados</h2>
+            <h2>Espacio analizado</h2>
             <span>{dryRun.candidates.length} elementos listos</span>
           </div>
           <button type="button" className="inline-link inline-link-block" onClick={onToggleDryRunPaths}>

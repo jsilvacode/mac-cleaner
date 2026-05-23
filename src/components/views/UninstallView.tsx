@@ -105,8 +105,8 @@ export function UninstallView({
           {!loading && installedApps.length === 0 && (
             <div className="empty-state compact">
               <Trash2 size={28} />
-              <h3>Sin apps escaneadas todavía</h3>
-              <p>Escanea apps instaladas para preparar una desinstalación segura.</p>
+              <h3>Tu Mac está libre de apps residuales.</h3>
+              <p>Cuando quieras revisar otra app, escanea de nuevo y te mostraremos todo antes de moverlo a la Papelera.</p>
             </div>
           )}
         </div>

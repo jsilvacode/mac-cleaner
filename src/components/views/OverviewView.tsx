@@ -27,6 +27,7 @@ export function OverviewView({
   onPrepareCleaning,
 }: OverviewViewProps) {
   const preparedTrashCount = dryRun?.candidates.length ?? 0;
+  const hasHighReclaimableSpace = totalKb >= 1024 * 1024;
 
   return (
     <>
@@ -47,7 +48,7 @@ export function OverviewView({
               <Search size={18} /> Escanear basura
             </button>
             <button className="secondary-action" disabled={loading || !scan} onClick={onPrepareCleaning}>
-              <Trash2 size={18} /> Preparar limpieza
+              <Trash2 size={18} /> Analizar espacio
             </button>
           </div>
         </div>
@@ -61,7 +62,13 @@ export function OverviewView({
       </motion.section>
 
       <section className="metrics-grid">
-        <MetricCard icon={<HardDrive size={19} />} label="Basura detectada" value={totalKb > 0 ? formatGb(totalKb) : "0.00 GB"} note="Cachés, temporales, logs y Papelera." />
+        <MetricCard
+          icon={<HardDrive size={19} />}
+          label="Basura detectada"
+          value={totalKb > 0 ? formatGb(totalKb) : "0.00 GB"}
+          note={hasHighReclaimableSpace ? "Hay espacio relevante para recuperar." : "Cachés, temporales, logs y Papelera."}
+          tone={hasHighReclaimableSpace ? "signal" : "default"}
+        />
         <MetricCard icon={<CheckCircle2 size={19} />} label="Bajo riesgo" value={String(safeItems)} note="Categorías listas para limpiar." />
         <MetricCard icon={<AlertTriangle size={19} />} label="Con confirmación" value={String(confirmItems)} note="Se limpian después de confirmar." />
         <MetricCard icon={<Database size={19} />} label="Preparados" value={String(preparedTrashCount)} note={dryRun ? "Archivos basura listos." : "Prepara la limpieza."} />
