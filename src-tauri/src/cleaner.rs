@@ -6,160 +6,73 @@ use std::fs;
 use std::fs::OpenOptions;
 #[cfg(feature = "native-clean")]
 use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime};
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ScanResponse {
-    pub version: String,
-    pub mode: String,
-    pub items: Vec<ScanItem>,
+mod apps_commands;
+mod history_commands;
+mod scanner_commands;
+mod types;
+
+use types::*;
+
+#[tauri::command(async)]
+pub fn scan_cleanable() -> Result<ScanResponse, String> {
+    scanner_commands::scan_cleanable_impl()
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ScanItem {
-    pub id: String,
-    pub label: String,
-    pub path: String,
-    pub age_days: u32,
-    pub risk: String,
-    pub estimated_kb: u64,
-    pub estimated_human: String,
+#[tauri::command(async)]
+pub fn dry_run_cleaning(categories: Vec<String>) -> Result<DryRunResponse, String> {
+    scanner_commands::dry_run_cleaning_impl(categories)
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct DryRunResponse {
-    pub version: String,
-    pub mode: String,
-    pub candidates: Vec<DryRunCandidate>,
+#[tauri::command(async)]
+pub fn run_cleaning(categories: Vec<String>) -> Result<CommandTextResponse, String> {
+    scanner_commands::run_cleaning_impl(categories)
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct DryRunCandidate {
-    pub category: String,
-    pub path: String,
-    pub size_kb: u64,
-    pub size_human: String,
-    pub risk: String,
+#[tauri::command(async)]
+pub fn find_large_files(threshold: String) -> Result<CommandTextResponse, String> {
+    scanner_commands::find_large_files_impl(threshold)
 }
 
-#[derive(Debug, Serialize)]
-pub struct CommandTextResponse {
-    pub ok: bool,
-    pub stdout: String,
-    pub stderr: String,
+#[tauri::command(async)]
+pub fn get_top_dirs() -> Result<CommandTextResponse, String> {
+    scanner_commands::get_top_dirs_impl()
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CleanHistoryEntry {
-    pub run_id: String,
-    pub started_at_epoch_secs: u64,
-    pub ended_at_epoch_secs: Option<u64>,
-    pub status: String,
-    pub selected_categories: Vec<String>,
-    pub candidate_count: u64,
-    pub deleted_count: u64,
-    pub error_count: u64,
-    pub reclaimed_total_kb: u64,
-    pub reclaimed_total_human: String,
-    pub log_file: String,
+#[tauri::command(async)]
+pub fn scan_installed_apps() -> Result<InstalledAppsResponse, String> {
+    apps_commands::scan_installed_apps_impl()
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ExportReportResponse {
-    pub ok: bool,
-    pub report_path: String,
-    pub exported_runs: usize,
+#[tauri::command(async)]
+pub fn prepare_app_uninstall(app_ids: Vec<String>) -> Result<AppUninstallPlanResponse, String> {
+    apps_commands::prepare_app_uninstall_impl(app_ids)
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PruneHistoryResponse {
-    pub ok: bool,
-    pub kept_runs: usize,
-    pub removed_runs: usize,
-    pub log_file: String,
+#[tauri::command(async)]
+pub fn uninstall_apps_to_trash(app_ids: Vec<String>) -> Result<AppUninstallResponse, String> {
+    apps_commands::uninstall_apps_to_trash_impl(app_ids)
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct InstalledAppItem {
-    pub id: String,
-    pub name: String,
-    pub path: String,
-    pub scope: String,
-    pub size_kb: u64,
-    pub size_human: String,
-    pub removable: bool,
-    pub reason: String,
+#[tauri::command(async)]
+pub fn get_clean_history(limit: Option<u32>) -> Result<Vec<CleanHistoryEntry>, String> {
+    history_commands::get_clean_history_impl(limit)
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct InstalledAppsResponse {
-    pub version: String,
-    pub mode: String,
-    pub items: Vec<InstalledAppItem>,
+#[tauri::command(async)]
+pub fn export_clean_history_report(limit: Option<u32>) -> Result<ExportReportResponse, String> {
+    history_commands::export_clean_history_report_impl(limit)
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AppUninstallPlanItem {
-    pub id: String,
-    pub name: String,
-    pub item_type: String,
-    pub path: String,
-    pub destination_hint: String,
-    pub size_kb: u64,
-    pub size_human: String,
-    pub risk: String,
+#[tauri::command(async)]
+pub fn apply_clean_history_retention(retention_days: u32) -> Result<PruneHistoryResponse, String> {
+    history_commands::apply_clean_history_retention_impl(retention_days)
 }
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AppUninstallLeftoverItem {
-    pub id: String,
-    pub app_id: String,
-    pub name: String,
-    pub item_type: String,
-    pub path: String,
-    pub destination_hint: String,
-    pub size_kb: u64,
-    pub size_human: String,
-    pub risk: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AppUninstallPlanResponse {
-    pub version: String,
-    pub mode: String,
-    pub items: Vec<AppUninstallPlanItem>,
-    pub leftovers: Vec<AppUninstallLeftoverItem>,
-    pub skipped: Vec<InstalledAppItem>,
-    pub total_kb: u64,
-    pub total_human: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AppUninstallResultItem {
-    pub id: String,
-    pub name: String,
-    pub item_type: String,
-    pub source_path: String,
-    pub destination_path: Option<String>,
-    pub moved_to_trash: bool,
-    pub moved_size_kb: u64,
-    pub moved_size_human: String,
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AppUninstallResponse {
-    pub ok: bool,
-    pub mode: String,
-    pub moved_count: usize,
-    pub skipped_count: usize,
-    pub moved_total_kb: u64,
-    pub moved_total_human: String,
-    pub items: Vec<AppUninstallResultItem>,
-}
-
 const ALLOWED_CATEGORIES: [&str; 4] = ["user_cache", "user_logs", "trash", "tmp"];
 const APP_MIN_AGE_DAYS: u32 = 1;
 const MAX_CLEAN_CANDIDATES_PER_CATEGORY: usize = 10_000;
@@ -176,83 +89,51 @@ const CLEAN_LOG_SUBDIR: &str = "Library/Logs/mac_cleaner_tauri_agent";
 const CLEAN_LOG_FILE: &str = "run-native-clean.jsonl";
 #[cfg(feature = "native-clean")]
 const CLEAN_REPORTS_SUBDIR: &str = "Library/Logs/mac_cleaner_tauri_agent/reports";
-
-struct ScanCategory {
-    id: &'static str,
-    label: &'static str,
-    path: PathBuf,
-    age_days: u32,
-    risk: &'static str,
-}
-
-#[cfg(feature = "native-clean")]
-#[derive(Debug)]
-struct CleanPlanItem {
-    category: String,
-    path: PathBuf,
-    size_kb: u64,
-}
-
-#[cfg(feature = "native-clean")]
-#[derive(Debug, Serialize)]
-struct NativeCleanItemResult {
-    category: String,
-    path: String,
-    deleted: bool,
-    reclaimed_kb: u64,
-    error: Option<String>,
-}
-
-#[cfg(feature = "native-clean")]
-#[derive(Debug, Serialize)]
-struct NativeCleanResponse {
-    ok: bool,
-    mode: String,
-    processed_categories: Vec<String>,
-    reclaimed_total_kb: u64,
-    reclaimed_total_human: String,
-    items: Vec<NativeCleanItemResult>,
-    log_file: String,
-}
-
-#[cfg(feature = "native-clean")]
-#[derive(Debug, Serialize, Deserialize)]
-struct CleanLogEvent {
-    ts_epoch_secs: u64,
-    event: String,
-    category: Option<String>,
-    path: Option<String>,
-    status: String,
-    reclaimed_kb: u64,
-    error: Option<String>,
-    detail: Option<String>,
-}
-
-#[cfg(feature = "native-clean")]
-#[derive(Debug)]
-struct CleanHistoryBuilder {
-    started_at_epoch_secs: u64,
-    ended_at_epoch_secs: Option<u64>,
-    status: String,
-    selected_categories: Vec<String>,
-    candidate_count: u64,
-    deleted_count: u64,
-    error_count: u64,
-    reclaimed_total_kb: u64,
-}
-
 fn script_path() -> Result<PathBuf, String> {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let repo_root = manifest_dir
-        .parent()
-        .ok_or_else(|| "No se pudo resolver la raíz del proyecto".to_string())?;
-    let path = repo_root.join("scripts").join("mac_cleaner_v2.sh");
+    let mut candidates: Vec<PathBuf> = Vec::new();
 
-    if !path.exists() {
-        return Err(format!("No se encontró el script: {}", path.display()));
+    if let Ok(current_exe) = env::current_exe() {
+        if let Some(exe_dir) = current_exe.parent() {
+            candidates.push(exe_dir.join("mac_cleaner_v2.sh"));
+            candidates.push(exe_dir.join("scripts").join("mac_cleaner_v2.sh"));
+            candidates.push(
+                exe_dir
+                    .join("..")
+                    .join("Resources")
+                    .join("scripts")
+                    .join("mac_cleaner_v2.sh"),
+            );
+            // Compatibilidad con recursos empaquetados usando rutas relativas con "..".
+            candidates.push(
+                exe_dir
+                    .join("..")
+                    .join("Resources")
+                    .join("_up_")
+                    .join("scripts")
+                    .join("mac_cleaner_v2.sh"),
+            );
+        }
     }
 
-    Ok(path)
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    if let Some(repo_root) = manifest_dir.parent() {
+        candidates.push(repo_root.join("scripts").join("mac_cleaner_v2.sh"));
+    }
+
+    for candidate in &candidates {
+        if candidate.is_file() {
+            return Ok(candidate.clone());
+        }
+    }
+
+    let searched = candidates
+        .into_iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<String>>()
+        .join(", ");
+    Err(format!(
+        "No se encontró el script mac_cleaner_v2.sh. Rutas revisadas: {searched}"
+    ))
 }
 
 fn run_script_dynamic(args: &[String]) -> Result<CommandTextResponse, String> {
@@ -351,7 +232,7 @@ fn parse_selected_categories(detail: Option<&str>) -> Vec<String> {
 fn finalize_history_run(
     runs: &mut Vec<CleanHistoryEntry>,
     builder: CleanHistoryBuilder,
-    log_path: &PathBuf,
+    log_path: &Path,
 ) {
     let run_id = format!(
         "native-{}-{}",
@@ -586,8 +467,8 @@ fn build_scan_categories() -> Result<Vec<ScanCategory>, String> {
             id: "tmp",
             label: "Archivos temporales",
             path: PathBuf::from("/tmp"),
-            age_days: 1,
-            risk: "medio",
+            age_days: 7,
+            risk: "alto",
         },
     ])
 }
@@ -633,6 +514,61 @@ fn size_kb(path: &PathBuf) -> u64 {
 
 fn is_path_inside_root(root: &Path, path: &Path) -> bool {
     path == root || path.starts_with(root)
+}
+
+#[derive(Clone, Copy)]
+struct PathIdentity {
+    is_file: bool,
+    is_dir: bool,
+    len: u64,
+    #[cfg(unix)]
+    dev: u64,
+    #[cfg(unix)]
+    ino: u64,
+}
+
+fn path_identity(meta: &fs::Metadata) -> PathIdentity {
+    PathIdentity {
+        is_file: meta.is_file(),
+        is_dir: meta.is_dir(),
+        len: meta.len(),
+        #[cfg(unix)]
+        dev: meta.dev(),
+        #[cfg(unix)]
+        ino: meta.ino(),
+    }
+}
+
+fn same_path_identity(before: &PathIdentity, after: &PathIdentity) -> bool {
+    if before.is_file != after.is_file || before.is_dir != after.is_dir || before.len != after.len {
+        return false;
+    }
+
+    #[cfg(unix)]
+    {
+        before.dev == after.dev && before.ino == after.ino
+    }
+
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+fn revalidate_stable_path(path: &Path, before: &PathIdentity) -> Result<fs::Metadata, String> {
+    let refreshed = fs::symlink_metadata(path)
+        .map_err(|err| format!("El archivo cambió durante la revisión: {err}"))?;
+
+    if refreshed.file_type().is_symlink() {
+        return Err("El archivo cambió a symlink durante la revisión".to_string());
+    }
+
+    let refreshed_identity = path_identity(&refreshed);
+    if !same_path_identity(before, &refreshed_identity) {
+        return Err("El archivo cambió durante la revisión de seguridad".to_string());
+    }
+
+    Ok(refreshed)
 }
 
 fn collect_recursive_file_candidates(
@@ -732,6 +668,13 @@ fn app_roots() -> Result<Vec<(&'static str, PathBuf)>, String> {
         ("system", PathBuf::from(SYSTEM_APPLICATIONS_DIR)),
         ("user", home.join(USER_APPLICATIONS_SUBDIR)),
     ])
+}
+
+fn is_path_in_app_roots(path: &Path) -> Result<bool, String> {
+    let roots = app_roots()?;
+    Ok(roots
+        .iter()
+        .any(|(_, root)| is_path_inside_root(root.as_path(), path)))
 }
 
 fn app_id_for(scope: &str, file_name: &str) -> String {
@@ -1209,7 +1152,7 @@ fn collect_large_files(path: &PathBuf, min_bytes: u64, out: &mut Vec<(PathBuf, u
     }
 }
 
-fn format_large_files_output(home: &PathBuf, threshold: &str, files: &[(PathBuf, u64)]) -> String {
+fn format_large_files_output(home: &Path, threshold: &str, files: &[(PathBuf, u64)]) -> String {
     let mut output = String::new();
     output.push_str("Archivos grandes en HOME\n");
     output.push_str(&format!(
@@ -1234,7 +1177,7 @@ fn format_large_files_output(home: &PathBuf, threshold: &str, files: &[(PathBuf,
     output
 }
 
-fn format_top_dirs_output(home: &PathBuf, dirs: &[(PathBuf, u64)]) -> String {
+fn format_top_dirs_output(home: &Path, dirs: &[(PathBuf, u64)]) -> String {
     let mut output = String::new();
     output.push_str("Top carpetas más pesadas en HOME\n");
     output.push_str(&format!("HOME: {}\n\n", home.display()));
@@ -1527,6 +1470,31 @@ fn run_cleaning_native(selected: &[String]) -> Result<CommandTextResponse, Strin
             continue;
         }
 
+        if !is_path_inside_root(&category.path, &item.path) {
+            let message = "Candidato omitido por salir de la ruta permitida".to_string();
+            let _ = append_clean_log(
+                &log_path,
+                &CleanLogEvent {
+                    ts_epoch_secs: unix_timestamp_secs(),
+                    event: "delete_error".to_string(),
+                    category: Some(item.category.clone()),
+                    path: Some(path_display.clone()),
+                    status: "skipped".to_string(),
+                    reclaimed_kb: 0,
+                    error: Some(message.clone()),
+                    detail: None,
+                },
+            );
+            items.push(NativeCleanItemResult {
+                category: item.category.clone(),
+                path: path_display,
+                deleted: false,
+                reclaimed_kb: 0,
+                error: Some(message),
+            });
+            continue;
+        }
+
         if !is_older_than(&meta, category.age_days) {
             let message = "Candidato omitido por antigüedad reciente".to_string();
             let _ = append_clean_log(
@@ -1552,9 +1520,63 @@ fn run_cleaning_native(selected: &[String]) -> Result<CommandTextResponse, Strin
             continue;
         }
 
-        let delete_result = if meta.is_file() {
+        let initial_identity = path_identity(&meta);
+        let refreshed_meta = match revalidate_stable_path(&item.path, &initial_identity) {
+            Ok(meta) => meta,
+            Err(err) => {
+                let _ = append_clean_log(
+                    &log_path,
+                    &CleanLogEvent {
+                        ts_epoch_secs: unix_timestamp_secs(),
+                        event: "delete_error".to_string(),
+                        category: Some(item.category.clone()),
+                        path: Some(path_display.clone()),
+                        status: "skipped".to_string(),
+                        reclaimed_kb: 0,
+                        error: Some(err.clone()),
+                        detail: None,
+                    },
+                );
+                items.push(NativeCleanItemResult {
+                    category: item.category.clone(),
+                    path: path_display,
+                    deleted: false,
+                    reclaimed_kb: 0,
+                    error: Some(err),
+                });
+                continue;
+            }
+        };
+
+        if !is_older_than(&refreshed_meta, category.age_days) {
+            let message =
+                "Candidato omitido porque cambió su antigüedad durante la revisión".to_string();
+            let _ = append_clean_log(
+                &log_path,
+                &CleanLogEvent {
+                    ts_epoch_secs: unix_timestamp_secs(),
+                    event: "delete_error".to_string(),
+                    category: Some(item.category.clone()),
+                    path: Some(path_display.clone()),
+                    status: "skipped".to_string(),
+                    reclaimed_kb: 0,
+                    error: Some(message.clone()),
+                    detail: None,
+                },
+            );
+            items.push(NativeCleanItemResult {
+                category: item.category.clone(),
+                path: path_display,
+                deleted: false,
+                reclaimed_kb: 0,
+                error: Some(message),
+            });
+            continue;
+        }
+
+        let delete_result = if refreshed_meta.is_file() {
             fs::remove_file(&item.path)
-        } else if meta.is_dir() {
+        } else if refreshed_meta.is_dir() {
             fs::remove_dir_all(&item.path)
         } else {
             Err(std::io::Error::other("Tipo de candidato no soportado"))
@@ -1645,444 +1667,6 @@ fn run_cleaning_native(selected: &[String]) -> Result<CommandTextResponse, Strin
         stdout,
         stderr: String::new(),
     })
-}
-
-#[tauri::command]
-pub fn scan_cleanable() -> Result<ScanResponse, String> {
-    let categories = build_scan_categories()?;
-    let mut items = Vec::with_capacity(categories.len());
-
-    for category in categories {
-        let estimated_kb = collect_category_candidates(&category)
-            .iter()
-            .map(|(_, size_kb)| *size_kb)
-            .sum();
-        items.push(ScanItem {
-            id: category.id.to_string(),
-            label: category.label.to_string(),
-            path: category.path.display().to_string(),
-            age_days: category.age_days,
-            risk: category.risk.to_string(),
-            estimated_kb,
-            estimated_human: human_size_kb(estimated_kb),
-        });
-    }
-
-    Ok(ScanResponse {
-        version: "2.1.0-rust-scan".to_string(),
-        mode: "scan".to_string(),
-        items,
-    })
-}
-
-#[tauri::command]
-pub fn dry_run_cleaning(categories: Vec<String>) -> Result<DryRunResponse, String> {
-    let selected = validate_and_normalize_categories(
-        categories,
-        "Selecciona al menos una categoría para ejecutar dry-run.",
-    )?;
-    let candidates = build_dry_run_candidates(&selected)?;
-
-    Ok(DryRunResponse {
-        version: "2.1.0-rust-dry-run".to_string(),
-        mode: "dry-run".to_string(),
-        candidates,
-    })
-}
-
-#[tauri::command]
-pub fn run_cleaning(categories: Vec<String>) -> Result<CommandTextResponse, String> {
-    let selected = validate_and_normalize_categories(
-        categories,
-        "Selecciona al menos una categoría para limpiar.",
-    )?;
-
-    #[cfg(feature = "native-clean")]
-    {
-        if bool_env_enabled(DUAL_PARITY_FLAG) {
-            return run_cleaning_parity_mode(&selected);
-        }
-        if !bool_env_enabled(FORCE_SHELL_FLAG) {
-            return run_cleaning_native(&selected);
-        }
-    }
-
-    let categories_csv = selected.join(",");
-    let args = vec![
-        "clean".to_string(),
-        "--yes".to_string(),
-        "--categories".to_string(),
-        categories_csv,
-    ];
-
-    run_script_dynamic(&args)
-}
-
-#[tauri::command]
-pub fn find_large_files(threshold: String) -> Result<CommandTextResponse, String> {
-    let allowed = ["500M", "1G", "2G", "5G"];
-    if !allowed.contains(&threshold.as_str()) {
-        return Err("Threshold no permitido. Usa 500M, 1G, 2G o 5G.".to_string());
-    }
-
-    let min_bytes = parse_threshold_to_bytes(&threshold)
-        .ok_or_else(|| "No se pudo interpretar el threshold solicitado.".to_string())?;
-    let home = resolve_home()?;
-    let mut files = Vec::new();
-    collect_large_files(&home, min_bytes, &mut files);
-    files.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-
-    Ok(CommandTextResponse {
-        ok: true,
-        stdout: format_large_files_output(&home, &threshold, &files),
-        stderr: String::new(),
-    })
-}
-
-#[tauri::command]
-pub fn get_top_dirs() -> Result<CommandTextResponse, String> {
-    let home = resolve_home()?;
-    let mut rows = Vec::new();
-
-    let entries =
-        fs::read_dir(&home).map_err(|err| format!("No se pudo leer HOME para top dirs: {err}"))?;
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Ok(meta) = fs::symlink_metadata(&path) else {
-            continue;
-        };
-        if meta.file_type().is_symlink() {
-            continue;
-        }
-        let kb = size_kb(&path);
-        rows.push((path, kb));
-    }
-
-    rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    rows.truncate(10);
-
-    Ok(CommandTextResponse {
-        ok: true,
-        stdout: format_top_dirs_output(&home, &rows),
-        stderr: String::new(),
-    })
-}
-
-#[tauri::command]
-pub fn scan_installed_apps() -> Result<InstalledAppsResponse, String> {
-    Ok(InstalledAppsResponse {
-        version: "0.1.0-app-uninstall".to_string(),
-        mode: "scan".to_string(),
-        items: collect_installed_apps()?,
-    })
-}
-
-#[tauri::command]
-pub fn prepare_app_uninstall(app_ids: Vec<String>) -> Result<AppUninstallPlanResponse, String> {
-    build_app_uninstall_plan(app_ids)
-}
-
-#[tauri::command]
-pub fn uninstall_apps_to_trash(app_ids: Vec<String>) -> Result<AppUninstallResponse, String> {
-    let plan = build_app_uninstall_plan(app_ids)?;
-    if plan.items.is_empty() {
-        return Err(
-            "No hay apps listas para retirar después de la revisión de seguridad.".to_string(),
-        );
-    }
-
-    let mut results = Vec::new();
-    let mut moved_total_kb = 0_u64;
-    let mut moved_count = 0_usize;
-    let mut skipped_count = plan.skipped.len();
-
-    for item in plan.items {
-        let source = PathBuf::from(&item.path);
-        let app_name = source
-            .file_name()
-            .and_then(|value| value.to_str())
-            .ok_or_else(|| "No se pudo resolver el nombre de la app.".to_string())?;
-
-        let path_display = source.display().to_string();
-        let meta = match fs::symlink_metadata(&source) {
-            Ok(meta) => meta,
-            Err(err) => {
-                skipped_count += 1;
-                results.push(AppUninstallResultItem {
-                    id: item.id,
-                    name: item.name,
-                    item_type: item.item_type,
-                    source_path: path_display,
-                    destination_path: None,
-                    moved_to_trash: false,
-                    moved_size_kb: 0,
-                    moved_size_human: human_size_kb(0),
-                    error: Some(format!("La app ya no está disponible: {err}")),
-                });
-                continue;
-            }
-        };
-
-        if meta.file_type().is_symlink() || !meta.is_dir() || !is_app_bundle(&source) {
-            skipped_count += 1;
-            results.push(AppUninstallResultItem {
-                id: item.id,
-                name: item.name,
-                item_type: item.item_type,
-                source_path: path_display,
-                destination_path: None,
-                moved_to_trash: false,
-                moved_size_kb: 0,
-                moved_size_human: human_size_kb(0),
-                error: Some("Omitida por no ser una app válida o por ser symlink.".to_string()),
-            });
-            continue;
-        }
-
-        let (removable, reason) = app_removal_status(app_name, &meta);
-        if !removable {
-            skipped_count += 1;
-            results.push(AppUninstallResultItem {
-                id: item.id,
-                name: item.name,
-                item_type: item.item_type,
-                source_path: path_display,
-                destination_path: None,
-                moved_to_trash: false,
-                moved_size_kb: 0,
-                moved_size_human: human_size_kb(0),
-                error: Some(reason),
-            });
-            continue;
-        }
-
-        let destination = unique_trash_destination(app_name)?;
-        let destination_display = destination.display().to_string();
-        match fs::rename(&source, &destination) {
-            Ok(_) => {
-                moved_count += 1;
-                moved_total_kb += item.size_kb;
-                results.push(AppUninstallResultItem {
-                    id: item.id,
-                    name: item.name,
-                    item_type: item.item_type,
-                    source_path: path_display,
-                    destination_path: Some(destination_display),
-                    moved_to_trash: true,
-                    moved_size_kb: item.size_kb,
-                    moved_size_human: item.size_human,
-                    error: None,
-                });
-            }
-            Err(err) => {
-                skipped_count += 1;
-                results.push(AppUninstallResultItem {
-                    id: item.id,
-                    name: item.name,
-                    item_type: item.item_type,
-                    source_path: path_display,
-                    destination_path: None,
-                    moved_to_trash: false,
-                    moved_size_kb: 0,
-                    moved_size_human: human_size_kb(0),
-                    error: Some(format!(
-                        "No se pudo mover a la Papelera. macOS puede requerir permisos: {err}"
-                    )),
-                });
-            }
-        }
-    }
-
-    let library = resolve_home()?.join("Library");
-    for item in plan.leftovers {
-        let source = PathBuf::from(&item.path);
-        let path_display = source.display().to_string();
-        let meta = match fs::symlink_metadata(&source) {
-            Ok(meta) => meta,
-            Err(err) => {
-                skipped_count += 1;
-                results.push(AppUninstallResultItem {
-                    id: item.id,
-                    name: item.name,
-                    item_type: item.item_type,
-                    source_path: path_display,
-                    destination_path: None,
-                    moved_to_trash: false,
-                    moved_size_kb: 0,
-                    moved_size_human: human_size_kb(0),
-                    error: Some(format!("El rastro ya no está disponible: {err}")),
-                });
-                continue;
-            }
-        };
-
-        if meta.file_type().is_symlink() || !is_path_inside_root(&library, &source) {
-            skipped_count += 1;
-            results.push(AppUninstallResultItem {
-                id: item.id,
-                name: item.name,
-                item_type: item.item_type,
-                source_path: path_display,
-                destination_path: None,
-                moved_to_trash: false,
-                moved_size_kb: 0,
-                moved_size_human: human_size_kb(0),
-                error: Some("Rastro omitido por seguridad.".to_string()),
-            });
-            continue;
-        }
-
-        let entry_name = source
-            .file_name()
-            .and_then(|value| value.to_str())
-            .map(|value| format!("{} - {value}", item.name.replace('/', "-")))
-            .unwrap_or_else(|| item.name.replace('/', "-"));
-        let destination = unique_trash_destination_entry(&entry_name)?;
-        let destination_display = destination.display().to_string();
-
-        match fs::rename(&source, &destination) {
-            Ok(_) => {
-                moved_count += 1;
-                moved_total_kb += item.size_kb;
-                results.push(AppUninstallResultItem {
-                    id: item.id,
-                    name: item.name,
-                    item_type: item.item_type,
-                    source_path: path_display,
-                    destination_path: Some(destination_display),
-                    moved_to_trash: true,
-                    moved_size_kb: item.size_kb,
-                    moved_size_human: item.size_human,
-                    error: None,
-                });
-            }
-            Err(err) => {
-                skipped_count += 1;
-                results.push(AppUninstallResultItem {
-                    id: item.id,
-                    name: item.name,
-                    item_type: item.item_type,
-                    source_path: path_display,
-                    destination_path: None,
-                    moved_to_trash: false,
-                    moved_size_kb: 0,
-                    moved_size_human: human_size_kb(0),
-                    error: Some(format!("No se pudo mover el rastro a la Papelera: {err}")),
-                });
-            }
-        }
-    }
-
-    Ok(AppUninstallResponse {
-        ok: moved_count > 0,
-        mode: "move-to-trash".to_string(),
-        moved_count,
-        skipped_count,
-        moved_total_kb,
-        moved_total_human: human_size_kb(moved_total_kb),
-        items: results,
-    })
-}
-
-#[tauri::command]
-pub fn get_clean_history(limit: Option<u32>) -> Result<Vec<CleanHistoryEntry>, String> {
-    #[cfg(feature = "native-clean")]
-    {
-        let max_limit = 200_u32;
-        let requested = limit.unwrap_or(20).clamp(1, max_limit);
-        return collect_clean_history(requested as usize);
-    }
-
-    #[cfg(not(feature = "native-clean"))]
-    {
-        let _ = limit;
-        Err("Historial nativo no disponible: feature native-clean desactivado.".to_string())
-    }
-}
-
-#[tauri::command]
-pub fn export_clean_history_report(limit: Option<u32>) -> Result<ExportReportResponse, String> {
-    #[cfg(feature = "native-clean")]
-    {
-        let max_limit = 200_u32;
-        let requested = limit.unwrap_or(20).clamp(1, max_limit);
-        let history = collect_clean_history(requested as usize)?;
-        let report_text = build_history_markdown_report(&history);
-        let reports_dir = clean_reports_dir_path()?;
-        fs::create_dir_all(&reports_dir)
-            .map_err(|err| format!("No se pudo crear directorio de reportes: {err}"))?;
-
-        let report_path = reports_dir.join(format!("history-report-{}.md", unix_timestamp_secs()));
-        fs::write(&report_path, report_text)
-            .map_err(|err| format!("No se pudo escribir reporte de historial: {err}"))?;
-
-        return Ok(ExportReportResponse {
-            ok: true,
-            report_path: report_path.display().to_string(),
-            exported_runs: history.len(),
-        });
-    }
-
-    #[cfg(not(feature = "native-clean"))]
-    {
-        let _ = limit;
-        Err("Exportación no disponible: feature native-clean desactivado.".to_string())
-    }
-}
-
-#[tauri::command]
-pub fn apply_clean_history_retention(retention_days: u32) -> Result<PruneHistoryResponse, String> {
-    #[cfg(feature = "native-clean")]
-    {
-        let min_days = 1_u32;
-        let max_days = 3650_u32;
-        if !(min_days..=max_days).contains(&retention_days) {
-            return Err("Retención inválida. Usa un valor entre 1 y 3650 días.".to_string());
-        }
-
-        let log_path = clean_log_file_path()?;
-        let lines = read_clean_log_lines(&log_path)?;
-        let runs = split_runs_from_log_lines(&lines);
-
-        let now = unix_timestamp_secs();
-        let retention_secs = u64::from(retention_days) * 24 * 60 * 60;
-        let cutoff = now.saturating_sub(retention_secs);
-
-        let mut kept_chunks: Vec<Vec<String>> = Vec::new();
-        let mut removed_runs = 0_usize;
-        for (started_at, run_lines) in runs {
-            if started_at >= cutoff {
-                kept_chunks.push(run_lines);
-            } else {
-                removed_runs += 1;
-            }
-        }
-
-        let mut output = String::new();
-        for chunk in &kept_chunks {
-            for line in chunk {
-                output.push_str(line);
-                output.push('\n');
-            }
-        }
-
-        fs::write(&log_path, output)
-            .map_err(|err| format!("No se pudo aplicar retención sobre log nativo: {err}"))?;
-
-        return Ok(PruneHistoryResponse {
-            ok: true,
-            kept_runs: kept_chunks.len(),
-            removed_runs,
-            log_file: log_path.display().to_string(),
-        });
-    }
-
-    #[cfg(not(feature = "native-clean"))]
-    {
-        let _ = retention_days;
-        Err("Retención no disponible: feature native-clean desactivado.".to_string())
-    }
 }
 
 #[cfg(test)]

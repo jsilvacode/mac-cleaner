@@ -24,6 +24,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Lint frontend
+        run: npm run lint
+
       - name: Build frontend
         run: npm run build
 
@@ -50,3 +53,19 @@ jobs:
       - name: Cargo check (native-clean feature)
         working-directory: src-tauri
         run: cargo check --features native-clean
+
+      - name: Cargo clippy (deny warnings)
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Cargo clippy native-clean (deny warnings)
+        working-directory: src-tauri
+        run: cargo clippy --all-targets --features native-clean -- -D warnings
+
+      - name: Cargo test
+        working-directory: src-tauri
+        run: cargo test
+
+      - name: Cargo test (native-clean feature)
+        working-directory: src-tauri
+        run: cargo test --features native-clean

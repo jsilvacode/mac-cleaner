@@ -101,6 +101,12 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 
 .nav-stack { display: grid; gap: 8px; }
 .nav-item {
+  width: 100%;
+  justify-content: flex-start;
+  border: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  background: transparent;
   color: #a8b3c2;
   text-decoration: none;
   padding: 12px;
@@ -111,7 +117,18 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
   font-weight: 700;
   cursor: pointer;
 }
-.nav-item.active, .nav-item:hover { color: #f5f7fa; background: rgba(255, 255, 255, 0.08); }
+.nav-item.active,
+.nav-item:hover:not(:disabled) {
+  color: #f5f7fa;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: transparent;
+  box-shadow: none;
+  transform: none;
+}
+.nav-item:focus-visible {
+  outline: 2px solid rgba(125, 183, 255, 0.55);
+  outline-offset: 2px;
+}
 
 .engine-card {
   margin-top: auto;
@@ -188,6 +205,7 @@ h1 {
 
 .secondary-action { background: rgba(255, 255, 255, 0.07); }
 .danger-action { background: linear-gradient(135deg, rgba(255, 211, 138, 0.24), rgba(255, 138, 138, 0.18)); }
+.warning-action { background: linear-gradient(135deg, rgba(255, 216, 142, 0.26), rgba(255, 199, 112, 0.16)); }
 
 .orbital-card {
   position: relative;
@@ -300,6 +318,54 @@ h1 {
 .cleaner-card[data-selected="false"] {
   opacity: 0.86;
 }
+
+.skeleton-card,
+.skeleton-row {
+  border-radius: 24px;
+  padding: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.04);
+  position: relative;
+  overflow: hidden;
+}
+
+.skeleton-row {
+  border-radius: 16px;
+}
+
+.skeleton-card::after,
+.skeleton-row::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    110deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.10) 45%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.skeleton-line {
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.10);
+  margin-bottom: 12px;
+}
+
+.skeleton-line.w-30 { width: 30%; }
+.skeleton-line.w-40 { width: 40%; }
+.skeleton-line.w-45 { width: 45%; }
+.skeleton-line.w-55 { width: 55%; }
+.skeleton-line.w-80 { width: 80%; }
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
 .card-topline {
   display: flex;
   justify-content: space-between;
@@ -317,6 +383,26 @@ h1 {
 .risk-high { color: #ff8a8a; background: rgba(255, 138, 138, 0.10); }
 .cleaner-card h3 { margin: 18px 0 8px; font-size: 17px; }
 .cleaner-card strong { font-size: 31px; letter-spacing: 0; }
+.inline-link {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  padding: 0;
+  color: #9db3ca;
+  justify-content: flex-start;
+  font-size: 12px;
+  font-weight: 700;
+}
+.inline-link:hover:not(:disabled) {
+  transform: none;
+  box-shadow: none;
+  border-color: transparent;
+  color: #c6d7ea;
+}
+.inline-link-block {
+  margin: 4px 0 12px;
+}
 .mono-path {
   color: #a8b3c2;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -353,6 +439,56 @@ h1 {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 pre { white-space: pre-wrap; overflow: auto; }
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgba(7, 10, 15, 0.62);
+  backdrop-filter: blur(6px);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.confirm-modal {
+  width: min(560px, 100%);
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: linear-gradient(145deg, rgba(19, 27, 40, 0.95), rgba(12, 18, 28, 0.92));
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+  padding: 20px;
+}
+
+.confirm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.confirm-header h2 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.icon-only {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+}
+
+.confirm-modal p {
+  color: #c2cfdd;
+  line-height: 1.55;
+  margin: 12px 0 18px;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
 
 .history-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));

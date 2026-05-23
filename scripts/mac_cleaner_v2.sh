@@ -111,7 +111,7 @@ catalog() {
 user_cache|Caché de usuario|${HOME}/Library/Caches|7|medio
 user_logs|Logs de usuario|${HOME}/Library/Logs|14|bajo
 trash|Papelera de usuario|${HOME}/.Trash|7|medio
-tmp|Temporales /tmp|/tmp|1|medio
+tmp|Temporales /tmp|/tmp|7|alto
 CATALOG
 }
 
@@ -225,7 +225,7 @@ estimated_cleanable_kb() {
     fi
     size=$(path_size_kb "$item")
     total=$((total + size))
-  done < <(find "$target" -mindepth 1 -maxdepth 1 -mtime +"$age_days" ! -type l -print0 2>/dev/null)
+  done < <(find "$target" -xdev -mindepth 1 -maxdepth 1 -mtime +"$age_days" ! -type l -print0 2>/dev/null)
 
   printf '%s\n' "$total"
 }
@@ -276,7 +276,24 @@ list_candidates() {
   local age_days="$2"
 
   validate_target "$target" >/dev/null 2>&1 || return 0
-  find "$target" -mindepth 1 -maxdepth 1 -mtime +"$age_days" ! -type l -print0 2>/dev/null
+  find "$target" -xdev -mindepth 1 -maxdepth 1 -mtime +"$age_days" ! -type l -print0 2>/dev/null
+}
+
+remove_candidate_safe() {
+  local item="$1"
+
+  if [ -L "$item" ]; then
+    log_warn "Omitido symlink: $item"
+    return 1
+  fi
+
+  if [ -d "$item" ]; then
+    rm -rf -- "$item" || { log_warn "No se pudo eliminar directorio: $item"; return 1; }
+    return 0
+  fi
+
+  rm -f -- "$item" || { log_warn "No se pudo eliminar archivo: $item"; return 1; }
+  return 0
 }
 
 run_dry_run() {
@@ -364,11 +381,7 @@ run_clean() {
     if [ "$auto_confirm" = "true" ] || confirm "Limpiar esta categoría"; then
       category_before=$(path_size_kb "$path")
       while IFS= read -r -d '' item; do
-        if [ -L "$item" ]; then
-          log_warn "Omitido symlink: $item"
-          continue
-        fi
-        rm -rf "$item" 2>/dev/null || log_warn "No se pudo eliminar: $item"
+        remove_candidate_safe "$item"
       done < <(list_candidates "$path" "$age")
       category_after=$(path_size_kb "$path")
       freed=$((category_before - category_after))
@@ -390,7 +403,7 @@ large_files() {
   separator
   log_info "Buscando archivos mayores a ${threshold}. No se eliminará nada."
 
-  find "$HOME" -type f -size +"$threshold" -print0 2>/dev/null | while IFS= read -r -d '' file; do
+  find "$HOME" -xdev -type f -size +"$threshold" -print0 2>/dev/null | while IFS= read -r -d '' file; do
     kb=$(path_size_kb "$file")
     printf "%10s  %s\n" "$(human_size_kb "$kb")" "$file"
   done

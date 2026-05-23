@@ -13,6 +13,14 @@
 - Public release notes prepared.
 - Release validation summary completed.
 - No development-only credentials or secrets included in the repository.
+- GitHub Actions release secrets configured:
+  - `APPLE_CERTIFICATE_BASE64`
+  - `APPLE_CERTIFICATE_PASSWORD`
+  - `APPLE_SIGNING_IDENTITY`
+  - `APPLE_ID`
+  - `APPLE_APP_SPECIFIC_PASSWORD`
+  - `APPLE_TEAM_ID`
+  - `KEYCHAIN_PASSWORD`
 
 ## 3) Build And Sign
 
@@ -38,11 +46,11 @@
 - Install on a clean supported macOS environment.
 - Launch the app without developer overrides.
 - Review the core product flows:
-  - guided cleanup review
-  - space review
-  - activity history
-  - preferences
-  - guided app removal
+  - inicio
+  - limpiar
+  - desinstalar
+  - espacio
+  - ajustes
 - Capture final release notes and validation summary.
 
 ## 7) Operational Safeguards

@@ -19,13 +19,15 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "resources": ["../scripts/mac_cleaner_v2.sh"],
+    "resources": {
+      "../scripts/mac_cleaner_v2.sh": "scripts/mac_cleaner_v2.sh"
+    },
     "icon": []
   }
 }
