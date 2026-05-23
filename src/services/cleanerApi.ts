@@ -11,6 +11,7 @@ import type {
   LargeFilesThreshold,
   PruneHistoryResponse,
   ScanResponse,
+  SystemMetrics,
 } from "../types/cleaner";
 
 async function invokeCleaner<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -67,4 +68,8 @@ export async function prepareAppUninstall(appIds: string[]): Promise<AppUninstal
 
 export async function uninstallAppsToTrash(appIds: string[]): Promise<AppUninstallResponse> {
   return invokeCleaner<AppUninstallResponse>("uninstall_apps_to_trash", { appIds });
+}
+
+export async function getSystemMetrics(): Promise<SystemMetrics> {
+  return invokeCleaner<SystemMetrics>("get_system_metrics");
 }

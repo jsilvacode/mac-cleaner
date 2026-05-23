@@ -14,6 +14,7 @@ use std::time::{Duration, SystemTime};
 
 mod apps_commands;
 mod history_commands;
+mod metrics_commands;
 mod scanner_commands;
 mod types;
 
@@ -73,6 +74,12 @@ pub fn export_clean_history_report(limit: Option<u32>) -> Result<ExportReportRes
 pub fn apply_clean_history_retention(retention_days: u32) -> Result<PruneHistoryResponse, String> {
     history_commands::apply_clean_history_retention_impl(retention_days)
 }
+
+#[tauri::command(async)]
+pub fn get_system_metrics() -> Result<SystemMetrics, String> {
+    metrics_commands::get_system_metrics_impl()
+}
+
 const ALLOWED_CATEGORIES: [&str; 4] = ["user_cache", "user_logs", "trash", "tmp"];
 const APP_MIN_AGE_DAYS: u32 = 1;
 const MAX_CLEAN_CANDIDATES_PER_CATEGORY: usize = 10_000;

@@ -14,7 +14,8 @@ pub fn run() {
             cleaner::uninstall_apps_to_trash,
             cleaner::get_clean_history,
             cleaner::export_clean_history_report,
-            cleaner::apply_clean_history_retention
+            cleaner::apply_clean_history_retention,
+            cleaner::get_system_metrics
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

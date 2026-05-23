@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
-import { AlertTriangle, CheckCircle2, Database, HardDrive, Search, Sparkles, Trash2 } from "lucide-react";
-import type { DryRunResponse, ScanResponse } from "../../types/cleaner";
+import { AlertTriangle, Battery, BatteryCharging, CheckCircle2, Cpu, Database, HardDrive, MemoryStick, Search, Sparkles, Trash2 } from "lucide-react";
+import type { DryRunResponse, ScanResponse, SystemMetrics } from "../../types/cleaner";
 import { MetricCard } from "../common/MetricCard";
 
 type OverviewViewProps = {
@@ -8,6 +8,7 @@ type OverviewViewProps = {
   totalKb: number;
   scan: ScanResponse | null;
   dryRun: DryRunResponse | null;
+  systemMetrics: SystemMetrics | null;
   safeItems: number;
   confirmItems: number;
   onScan: () => void;
@@ -21,6 +22,7 @@ export function OverviewView({
   totalKb,
   scan,
   dryRun,
+  systemMetrics,
   safeItems,
   confirmItems,
   onScan,
@@ -28,6 +30,13 @@ export function OverviewView({
 }: OverviewViewProps) {
   const preparedTrashCount = dryRun?.candidates.length ?? 0;
   const hasHighReclaimableSpace = totalKb >= 1024 * 1024;
+  const cpuDisplay = systemMetrics ? `${systemMetrics.cpu_usage_percent.toFixed(1)}%` : "--%";
+  const ramDisplay = systemMetrics
+    ? `${systemMetrics.ram_used_gb.toFixed(1)} / ${systemMetrics.ram_total_gb.toFixed(1)} GB`
+    : "-- / -- GB";
+  const batteryDisplay = systemMetrics?.battery_percent !== null
+    ? `${systemMetrics?.battery_percent}% ${systemMetrics?.is_charging ? "· Cargando" : "· En uso"}`
+    : "No disponible";
 
   return (
     <>
@@ -72,6 +81,14 @@ export function OverviewView({
         <MetricCard icon={<CheckCircle2 size={19} />} label="Bajo riesgo" value={String(safeItems)} note="Categorías listas para limpiar." />
         <MetricCard icon={<AlertTriangle size={19} />} label="Con confirmación" value={String(confirmItems)} note="Se limpian después de confirmar." />
         <MetricCard icon={<Database size={19} />} label="Preparados" value={String(preparedTrashCount)} note={dryRun ? "Archivos basura listos." : "Prepara la limpieza."} />
+        <MetricCard icon={<Cpu size={19} />} label="CPU" value={cpuDisplay} note="Uso global del sistema en tiempo real." />
+        <MetricCard icon={<MemoryStick size={19} />} label="RAM" value={ramDisplay} note="Memoria utilizada sobre el total disponible." />
+        <MetricCard
+          icon={systemMetrics?.is_charging ? <BatteryCharging size={19} /> : <Battery size={19} />}
+          label="Batería"
+          value={batteryDisplay}
+          note="Estado de energía del equipo."
+        />
       </section>
     </>
   );

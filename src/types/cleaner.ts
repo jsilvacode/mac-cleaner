@@ -37,6 +37,14 @@ export interface CommandTextResponse {
   stderr: string;
 }
 
+export interface SystemMetrics {
+  cpu_usage_percent: number;
+  ram_used_gb: number;
+  ram_total_gb: number;
+  battery_percent: number | null;
+  is_charging: boolean;
+}
+
 export interface CleanHistoryEntry {
   run_id: string;
   started_at_epoch_secs: number;

@@ -41,6 +41,15 @@ pub struct CommandTextResponse {
     pub stderr: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SystemMetrics {
+    pub cpu_usage_percent: f32,
+    pub ram_used_gb: f32,
+    pub ram_total_gb: f32,
+    pub battery_percent: Option<u8>,
+    pub is_charging: bool,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CleanHistoryEntry {
     pub run_id: String,

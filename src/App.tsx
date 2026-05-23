@@ -33,6 +33,7 @@ import { UninstallView } from "./components/views/UninstallView";
 import { FilesView } from "./components/views/FilesView";
 import { SettingsView } from "./components/views/SettingsView";
 import type { AppView } from "./components/views/viewTypes";
+import { useSystemMetrics } from "./hooks/useSystemMetrics";
 
 const PREFERENCES_KEY = "mac_cleaner_preferences_v2";
 
@@ -135,6 +136,7 @@ export default function App() {
   const [showUninstallPlanPaths, setShowUninstallPlanPaths] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
+  const systemMetrics = useSystemMetrics(3000, view === "overview");
 
   useEffect(() => {
     window.localStorage.setItem(PREFERENCES_KEY, JSON.stringify(preferences));
@@ -370,6 +372,7 @@ export default function App() {
             totalKb={totalKb}
             scan={scan}
             dryRun={dryRun}
+            systemMetrics={systemMetrics}
             safeItems={safeItems}
             confirmItems={confirmItems}
             onScan={() => runAction(scanCleanable, applyScanResult)}
